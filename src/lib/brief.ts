@@ -56,9 +56,9 @@ export function composeBrief(
 }
 
 /**
- * Format complete brief as WhatsApp message
+ * Format complete brief as Telegram message
  */
-export function formatBriefAsWhatsApp(brief: MorningBrief): string {
+export function formatBriefAsTelegram(brief: MorningBrief): string {
   let output = `🌅 *GOOD MORNING — CAPITAL PILOT BRIEF*\n`;
   output += `${brief.date} | 8:00 AM EST\n`;
   output += `${"═".repeat(30)}\n\n`;

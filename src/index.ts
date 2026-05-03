@@ -75,7 +75,7 @@ import {
   formatBalanceVerification,
 } from "./lib/fidelity";
 import { scanSector, getMockSectorQuotes } from "./lib/profitMaximizer";
-import { composeBrief, formatBriefAsWhatsApp, hasHighPriorityItems } from "./lib/brief";
+import { composeBrief, formatBriefAsTelegram, hasHighPriorityItems } from "./lib/brief";
 import {
   scanGmailForDiscoverAlerts,
   getMockGmailTransactions,
@@ -260,7 +260,7 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
   const gmailSection = formatGmailTransactionsForBrief(gmailTransactions);
   const fidelitySection = formatFidelityAlerts(fidelityAlerts);
   const balanceSection = formatBalanceVerification(balanceVerification);
-  const briefText = formatBriefAsWhatsApp(brief);
+  const briefText = formatBriefAsTelegram(brief);
 
   const message = [gmailSection, fidelitySection, balanceSection, briefText]
     .filter(s => s.trim().length > 0)

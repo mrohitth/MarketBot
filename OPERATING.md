@@ -14,7 +14,7 @@ MONTHLY_NET_INCOME=8500
 PORTFOLIO_TOTAL=850000
 GMAIL_USER=mathew.rohit.thomson@gmail.com
 GMAIL_APP_PASSWORD=[GMAIL_APP_PASSWORD_FOR_IMAP]
-WHATSAPP_WEBHOOK_SECRET=[FROM_OPENCLAW_WHATSAPP_CHANNEL]
+# Telegram delivery handled automatically by OpenClaw cron announce
 DISCOVER_CSV_PATH=./data/discover-transactions.csv
 ```
 
@@ -90,7 +90,7 @@ When any position drops >8% in a day:
 
 ---
 
-## Running Without Alpha Vantage Key
+## Running Without Alpha Vantage Key / Telegram Setup
 
 If no Alpha Vantage key, the system gracefully falls back to mock data:
 - Logs: `[MARKET] No API key — using mock data`
@@ -124,7 +124,7 @@ If no Alpha Vantage key, the system gracefully falls back to mock data:
 | `src/lib/market.ts` | Alpha Vantage, drift calc |
 | `src/lib/fidelity.ts` | Gmail/Fidelity email scanner for trade confirmation context |
 | `src/lib/profitMaximizer.ts` | Sector scanner |
-| `src/lib/brief.ts` | WhatsApp message formatter |
+| `src/lib/brief.ts` | Telegram message formatter |
 | `src/lib/types.ts` | All interfaces |
 | `data/portfolio.json` | Static portfolio positions with costs (share counts must be entered) |
 | `data/portfolio-context.md` | Full portfolio baseline from email extraction |
@@ -137,4 +137,4 @@ If no Alpha Vantage key, the system gracefully falls back to mock data:
 1. **Unit test:** `npm test` (uses mock data)
 2. **Full mock brief:** `npm run test:daily`
 3. **Live brief:** `npm run test:live` (requires API keys)
-4. **Send to WhatsApp:** `node dist/index.js --live --send`
+4. **Delivery:** Via OpenClaw cron announce to Telegram (telegram:5607383477) — no manual send flag needed
