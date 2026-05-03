@@ -135,6 +135,43 @@ export interface AlphaVantageRSIResponse {
   };
 }
 
+// === Fidelity Types ===
+
+export interface PortfolioEntry {
+  shares: number;
+  note?: string;
+}
+
+export interface PortfolioStatic {
+  lastUpdated: string;
+  note: string;
+  positions: {
+    NVDA: PortfolioEntry;
+    SMH: PortfolioEntry;
+    SCHG: PortfolioEntry;
+  };
+}
+
+export interface FidelityAlert {
+  type: "transfer" | "trade_confirmation" | "balance_alert";
+  subject: string;
+  date: string;
+  amount?: number;
+  balance?: number;
+  ticker?: string;
+  shares?: number;
+  action?: "BUY" | "SELL";
+  rawSnippet: string;
+}
+
+export interface BalanceVerification {
+  ticker: string;
+  agentValue: number;
+  fidelityValue: number;
+  difference: number;
+  withinThreshold: boolean;
+}
+
 // === Configuration Types ===
 
 export interface BudgetLimits {
