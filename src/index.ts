@@ -59,7 +59,8 @@ import {
   getBudgetAlerts 
 } from "./lib/budget";
 import { 
-  getQuote, 
+  getBatchQuotes,
+  TICKERS,
   calculatePositions, 
   generateRebalanceRecommendations,
   getMockQuotes,
@@ -169,17 +170,11 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
     console.log("[MARKET] Using mock quotes");
     quotes = getMockQuotes();
   } else {
-    console.log("[MARKET] Fetching real quotes from Alpha Vantage...");
-    const tickers = ["NVDA", "SMH", "SCHG"];
-    quotes = new Map();
-    
-    for (const ticker of tickers) {
-      console.log(`[MARKET] Fetching ${ticker}...`);
-      const quote = await getQuote(ticker, ALPHA_VANTAGE_KEY);
-      if (quote) {
-        quotes.set(ticker, quote);
-        console.log(`[MARKET] ${ticker}: $${quote.price.toFixed(2)} (${quote.changePercent.toFixed(2)}%)`);
-      }
+    console.log("[MARKET] Fetching real quotes from Yahoo Finance (batched)...");
+    quotes = await getBatchQuotes();
+    console.log(`[MARKET] Batch complete — ${quotes.size}/${TICKERS.length} quotes populated`);
+    for (const [ticker, quote] of quotes) {
+      console.log(`[MARKET] ${ticker}: $${quote.price.toFixed(2)} (${quote.changePercent.toFixed(2)}%)`);
     }
   }
 

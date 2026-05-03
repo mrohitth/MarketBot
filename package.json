@@ -24,7 +24,8 @@
   "dependencies": {
     "dotenv": "^16.0.0",
     "imap": "^0.8.19",
-    "node-cron": "^3.0.0"
+    "node-cron": "^3.0.0",
+    "yahoo-finance2": "^3.14.0"
   },
   "devDependencies": {
     "@types/imap": "^0.8.43",
