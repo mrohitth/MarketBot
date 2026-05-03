@@ -26,12 +26,23 @@ import {
 } from "./lib/market";
 import { scanSector, getMockSectorQuotes } from "./lib/profitMaximizer";
 import { composeBrief, formatBriefAsWhatsApp, hasHighPriorityItems } from "./lib/brief";
+import { 
+  scanGmailForDiscoverAlerts, 
+  getMockGmailTransactions, 
+  deduplicateTransactions,
+  formatGmailTransactionsForBrief,
+  GmailTransaction,
+  gmailToTransaction
+} from "./lib/gmail";
 import * as path from "path";
 
 // === Configuration ===
 
-const ALPHA_VANTAGE_KEY = process.env.ALPHA_VANTAGE_KEY || "demo"; // Use "demo" for testing
+const ALPHA_VANTAGE_KEY = process.env.ALPHA_VANTAGE_KEY || "demo";
+const GMAIL_USER = process.env.GMAIL_USER || "";
+const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD || "";
 const CSV_PATH = process.env.DISCOVER_CSV_PATH || path.join(__dirname, "../data/discover-transactions.csv");
+const MONTHLY_NET_INCOME = parseInt(process.env.MONTHLY_NET_INCOME || "8500");
 
 const BUDGET_LIMITS: BudgetLimits = {
   dining: 600,
@@ -40,7 +51,7 @@ const BUDGET_LIMITS: BudgetLimits = {
   savingsRateTarget: 30,
 };
 
-const PORTFOLIO_TARGETS: PortfolioTargets = MOCK_TARGETS; // 40% NVDA, 30% SMH, 20% SCHG, 10% Cash
+const PORTFOLIO_TARGETS: PortfolioTargets = MOCK_TARGETS;
 const DRIFT_THRESHOLDS: DriftThresholds = MOCK_DRIFT_THRESHOLDS;
 
 // === Main Orchestrator ===
@@ -48,11 +59,13 @@ const DRIFT_THRESHOLDS: DriftThresholds = MOCK_DRIFT_THRESHOLDS;
 interface Config {
   useMockData: boolean;
   sendWhatsApp: boolean;
+  useGmail: boolean;
 }
 
 const DEFAULT_CONFIG: Config = {
   useMockData: true,  // Set to false to use real APIs
-  sendWhatsApp: false, // Set to true to actually send WhatsApp
+  sendWhatsApp: false,
+  useGmail: false,    // Set to true to enable Gmail scanning
 };
 
 /**
@@ -60,21 +73,43 @@ const DEFAULT_CONFIG: Config = {
  */
 export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promise<string> {
   console.log("[CAPITAL PILOT] Starting daily brief generation...");
-  console.log(`[CONFIG] Mock data: ${config.useMockData}, WhatsApp: ${config.sendWhatsApp}`);
+  console.log(`[CONFIG] Mock data: ${config.useMockData}, WhatsApp: ${config.sendWhatsApp}, Gmail: ${config.useGmail}`);
 
-  // Step 1: Budget Pacing
+  let gmailTransactions: GmailTransaction[] = [];
+
+  // Step 0.5: Gmail Scanning (real-time transaction capture)
+  if (config.useGmail && GMAIL_USER && GMAIL_APP_PASSWORD) {
+    console.log("\n[STEP 0.5] Scanning Gmail for Discover alerts...");
+    try {
+      gmailTransactions = await scanGmailForDiscoverAlerts(GMAIL_USER, GMAIL_APP_PASSWORD);
+      console.log(`[GMAIL] Found ${gmailTransactions.length} new alerts`);
+    } catch (error) {
+      console.error("[GMAIL] Failed to scan Gmail:", error);
+    }
+  } else if (config.useMockData) {
+    // Use mock Gmail data for testing
+    gmailTransactions = getMockGmailTransactions();
+    console.log(`[GMAIL] Using ${gmailTransactions.length} mock alerts`);
+  }
+
+  // Step 1: Budget Pacing (CSV + Gmail hybrid)
   console.log("\n[STEP 1] Processing budget pacing...");
   let transactions: Transaction[];
   let budgetPacing: BudgetPacingReport;
 
   if (config.useMockData) {
-    console.log("[BUDGET] Using mock transactions");
+    console.log("[BUDGET] Using mock transactions + mock Gmail");
     transactions = getMockTransactions();
-    budgetPacing = calculateBudgetPacing(transactions, BUDGET_LIMITS, 8500); // $8500 net income placeholder
+    budgetPacing = calculateBudgetPacing(transactions, BUDGET_LIMITS, MONTHLY_NET_INCOME);
   } else {
     console.log(`[BUDGET] Parsing CSV from ${CSV_PATH}`);
-    transactions = parseDiscoverCSV(CSV_PATH);
-    budgetPacing = calculateBudgetPacing(transactions, BUDGET_LIMITS);
+    const csvTransactions = parseDiscoverCSV(CSV_PATH);
+    
+    // Deduplicate CSV + Gmail (CSV takes priority - audited record)
+    transactions = deduplicateTransactions(csvTransactions, gmailTransactions);
+    console.log(`[BUDGET] Combined ${transactions.length} transactions (CSV + Gmail)`);
+    
+    budgetPacing = calculateBudgetPacing(transactions, BUDGET_LIMITS, MONTHLY_NET_INCOME);
   }
 
   console.log(`[BUDGET] Spent: $${budgetPacing.totalSpent.toFixed(0)} / $${budgetPacing.totalBudget.toFixed(0)}`);
@@ -137,7 +172,6 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
   if (config.useMockData) {
     sectorQuotes = getMockSectorQuotes();
   } else {
-    // In production, fetch additional tickers
     sectorQuotes = new Map();
   }
 
@@ -158,7 +192,9 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
     85000 * 0.1 // Cash available = 10% of $850k portfolio
   );
 
-  const whatsappMessage = formatBriefAsWhatsApp(brief);
+  // Add Gmail alerts to brief output
+  const gmailSection = formatGmailTransactionsForBrief(gmailTransactions);
+  const whatsappMessage = gmailSection + "\n" + formatBriefAsWhatsApp(brief);
   console.log("\n" + whatsappMessage);
 
   // Step 7: Send WhatsApp (if configured)
@@ -173,7 +209,7 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
   // Summary
   console.log("\n" + "═".repeat(40));
   console.log("[CAPITAL PILOT] Daily brief complete");
-  console.log(`[SUMMARY] Budget: ${budgetPacing.status} | Market: ${brief.marketSummary.overallSignal} | Actions: ${recommendations.length}`);
+  console.log(`[SUMMARY] Budget: ${budgetPacing.status} | Market: ${brief.marketSummary.overallSignal} | Actions: ${recommendations.length} | Gmail Alerts: ${gmailTransactions.length}`);
   
   if (hasHighPriorityItems(brief)) {
     console.log("[ALERT] High-priority items detected — requires confirmation");
@@ -184,13 +220,8 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
 
 /**
  * Send WhatsApp message via OpenClaw
- * In production, this would use OpenClaw's WhatsApp integration
  */
 async function sendWhatsApp(message: string): Promise<void> {
-  // In production: use OpenClaw's cron/webhook system or direct messaging
-  // For now, we'll use the OpenClaw sessions_send or cron to deliver to WhatsApp
-  
-  // Get WhatsApp webhook secret from env
   const secret = process.env.WHATSAPP_WEBHOOK_SECRET;
   if (!secret || secret === "[PASTE_YOUR_SECRET_HERE]") {
     console.log("[WHATSAPP] No webhook secret configured — skipping send");
@@ -199,7 +230,6 @@ async function sendWhatsApp(message: string): Promise<void> {
   }
   
   console.log("[WHATSAPP] Would send message of length:", message.length);
-  console.log("[WHATSAPP] To enable: set WHATSAPP_WEBHOOK_SECRET in .env");
 }
 
 /**
@@ -210,6 +240,7 @@ async function main() {
   const config: Config = {
     useMockData: !args.includes("--live"),
     sendWhatsApp: args.includes("--send"),
+    useGmail: !args.includes("--no-gmail"),
   };
 
   await generateDailyBrief(config);
