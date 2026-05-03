@@ -1,0 +1,32 @@
+{
+  "name": "marketbot",
+  "version": "1.0.0",
+  "description": "The Capital Pilot — High-Conviction Financial Strategist",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch",
+    "test": "node --loader ts-node/esm src/index.ts --mock",
+    "test:daily": "node --loader ts-node/esm src/index.ts --mock",
+    "test:live": "node --loader ts-node/esm src/index.ts --live",
+    "import:discover": "node dist/scripts/import-discover.js",
+    "test:verbose": "node --loader ts-node/esm src/index.ts --mock --verbose"
+  },
+  "keywords": ["finance", "investing", "portfolio", "budget"],
+  "author": "mrohitth",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^16.0.0",
+    "node-cron": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/node-cron": "^3.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
