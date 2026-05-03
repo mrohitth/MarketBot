@@ -27,10 +27,8 @@ function loadEnv(): void {
     const key = trimmed.substring(0, eqIndex).trim();
     const value = trimmed.substring(eqIndex + 1).trim();
 
-    const envKey = key === "ALPHA_VANTAGE_API_KEY" ? "ALPHA_VANTAGE_KEY" : key;
-
-    if (!process.env[envKey]) {
-      process.env[envKey] = value;
+    if (!process.env[key]) {
+      process.env[key] = value;
     }
   }
 
@@ -51,7 +49,6 @@ import {
   ProfitMaximizerIdea,
   FidelityAlert,
   BalanceVerification,
-  PortfolioStatic,
 } from "./lib/types";
 import {
   parseDiscoverCSV,
@@ -104,48 +101,49 @@ const BUDGET_LIMITS: BudgetLimits = {
 
 const PORTFOLIO_TARGETS: PortfolioTargets = MOCK_TARGETS;
 const DRIFT_THRESHOLDS: DriftThresholds = MOCK_DRIFT_THRESHOLDS;
-const BALANCE_VERIFY_THRESHOLD = 10; // $10 difference triggers alert
 
 // === Main Orchestrator ===
 
 interface Config {
   useMockData: boolean;
-  sendWhatsApp: boolean;
   useGmail: boolean;
 }
 
 const DEFAULT_CONFIG: Config = {
   useMockData: true,
-  sendWhatsApp: false,
   useGmail: false,
 };
 
 /**
- * Main daily brief generation
+ * Main daily brief generation.
+ *
+ * Output: Returns the full brief as a string. OpenClaw cron `delivery.announce`
+ * picks up the run output and sends it to Telegram (telegram:5607383477) automatically.
+ * No webhook or send flag needed.
  */
 export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promise<string> {
   console.log("[CAPITAL PILOT] Starting daily brief generation...");
-  console.log(`[CONFIG] Mock data: ${config.useMockData}, WhatsApp: ${config.sendWhatsApp}, Gmail: ${config.useGmail}`);
+  console.log(`[CONFIG] Mock data: ${config.useMockData}, Gmail: ${config.useGmail}`);
 
   let gmailTransactions: GmailTransaction[] = [];
   let fidelityAlerts: FidelityAlert[] = [];
   let balanceVerification: BalanceVerification[] = [];
 
-  // Step 0.5: Gmail Scanning — Discover transaction alerts
+  // Step 0.5: Gmail — Discover transaction alerts
   if (config.useGmail && GMAIL_USER && GMAIL_APP_PASSWORD) {
     console.log("\n[STEP 0.5] Scanning Gmail for Discover alerts...");
     try {
       gmailTransactions = await scanGmailForDiscoverAlerts(GMAIL_USER, GMAIL_APP_PASSWORD);
-      console.log(`[GMAIL] Found ${gmailTransactions.length} Discover alerts`);
+      console.log(`[GMAIL] Found ${gmailTransactions.length} Discover alert(s)`);
     } catch (error) {
       console.error("[GMAIL] Failed to scan Gmail:", error);
     }
   } else if (config.useMockData) {
     gmailTransactions = getMockGmailTransactions();
-    console.log(`[GMAIL] Using ${gmailTransactions.length} mock Discover alerts`);
+    console.log(`[GMAIL] Using ${gmailTransactions.length} mock Discover alert(s)`);
   }
 
-  // Step 0.6: Gmail Scanning — Fidelity alerts (transfers, trade confirmations, balance)
+  // Step 0.6: Gmail — Fidelity alerts (transfers, trade confirmations, balance)
   if (config.useGmail && GMAIL_USER && GMAIL_APP_PASSWORD) {
     console.log("\n[STEP 0.6] Scanning Gmail for Fidelity alerts...");
     try {
@@ -155,14 +153,13 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
         console.log(`[FIDELITY]   - [${alert.type.toUpperCase()}] ${alert.subject}`);
       }
 
-      // If balance alert found, run verification
+      // Trigger balance verification if Fidelity balance email found
       const balanceAlerts = fidelityAlerts.filter(a => a.type === "balance_alert" && a.balance);
       if (balanceAlerts.length > 0) {
-        console.log("\n[STEP 3b] Running balance verification...");
+        console.log("\n[STEP 0.6b] Running balance verification...");
         const portfolio = loadPortfolio();
-        const balance = balanceAlerts[0].balance!;
-        balanceVerification = await verifyBalance(balance, portfolio, PORTFOLIO_TARGETS);
-        console.log(`[FIDELITY] Verification: diff=$${balanceVerification[0]?.difference.toFixed(2)}`);
+        balanceVerification = await verifyBalance(balanceAlerts[0].balance!, portfolio, PORTFOLIO_TARGETS);
+        console.log(`[FIDELITY] Balance check: diff=$${balanceVerification[0]?.difference.toFixed(2)}`);
       }
     } catch (error) {
       console.error("[FIDELITY] Failed to scan Gmail:", error);
@@ -181,10 +178,8 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
   } else {
     console.log(`[BUDGET] Parsing CSV from ${CSV_PATH}`);
     const csvTransactions = parseDiscoverCSV(CSV_PATH);
-
     transactions = deduplicateTransactions(csvTransactions, gmailTransactions);
-    console.log(`[BUDGET] Combined ${transactions.length} transactions (CSV + Gmail)`);
-
+    console.log(`[BUDGET] Combined ${transactions.length} transaction(s) (CSV + Gmail)`);
     budgetPacing = calculateBudgetPacing(transactions, BUDGET_LIMITS, MONTHLY_NET_INCOME);
   }
 
@@ -196,7 +191,7 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
     console.log("[BUDGET] Alerts:", budgetAlerts);
   }
 
-  // Step 2: Market Data — live prices via Yahoo Finance (no keys needed)
+  // Step 2: Market Data — live prices via Yahoo Finance (no API keys needed)
   console.log("\n[STEP 2] Fetching market data...");
   let quotes: Map<string, MarketData>;
 
@@ -208,25 +203,24 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
     quotes = await getBatchQuotes();
     console.log(`[MARKET] Batch complete — ${quotes.size}/${TICKERS.length} quotes populated`);
     for (const [ticker, quote] of quotes) {
-      console.log(`[MARKET] ${ticker}: $${quote.price.toFixed(2)} (${quote.changePercent > 0 ? "+" : ""}${quote.changePercent.toFixed(2)}%)`);
+      const sign = quote.changePercent > 0 ? "+" : "";
+      console.log(`[MARKET] ${ticker}: $${quote.price.toFixed(2)} (${sign}${quote.changePercent.toFixed(2)}%)`);
     }
   }
 
-  // Step 3: Portfolio Positions — from portfolio.json (manual share counts)
+  // Step 3: Portfolio Positions — from portfolio.json (manual share counts in live mode)
   console.log("\n[STEP 3] Calculating portfolio positions from portfolio.json...");
   let positions: Position[];
 
   if (config.useMockData) {
-    const holdings = getMockHoldings();
-    positions = calculatePositions(quotes, holdings, PORTFOLIO_TARGETS, DRIFT_THRESHOLDS);
+    positions = calculatePositions(quotes, getMockHoldings(), PORTFOLIO_TARGETS, DRIFT_THRESHOLDS);
   } else {
-    const holdings = getHoldingsFromPortfolio();
-    positions = calculatePositions(quotes, holdings, PORTFOLIO_TARGETS, DRIFT_THRESHOLDS);
+    positions = calculatePositions(quotes, getHoldingsFromPortfolio(), PORTFOLIO_TARGETS, DRIFT_THRESHOLDS);
   }
 
   for (const pos of positions) {
-    const driftEmoji = pos.drift > 0 ? "+" : "";
-    console.log(`[PORTFOLIO] ${pos.ticker}: $${pos.marketValue.toFixed(0)} | ${pos.weight.toFixed(1)}% | ${driftEmoji}${pos.drift.toFixed(1)}%`);
+    const driftSign = pos.drift > 0 ? "+" : "";
+    console.log(`[PORTFOLIO] ${pos.ticker}: $${pos.marketValue.toFixed(0)} | ${pos.weight.toFixed(1)}% | ${driftSign}${pos.drift.toFixed(1)}%`);
   }
 
   // Step 4: Rebalance Recommendations
@@ -244,14 +238,7 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
 
   // Step 5: Profit Maximizer
   console.log("\n[STEP 5] Scanning sector for Profit Maximizer setups...");
-  let sectorQuotes: Map<string, MarketData>;
-
-  if (config.useMockData) {
-    sectorQuotes = getMockSectorQuotes();
-  } else {
-    sectorQuotes = new Map();
-  }
-
+  const sectorQuotes = config.useMockData ? getMockSectorQuotes() : new Map<string, MarketData>();
   const profitMaximizer = await scanSector(sectorQuotes);
   console.log(`[PROFIT MAX] Found ${profitMaximizer.length} setup(s)`);
   for (const idea of profitMaximizer) {
@@ -269,70 +256,45 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
     MONTHLY_NET_INCOME * 0.1
   );
 
-  // Assemble WhatsApp message
+  // Assemble final message (Discover + Fidelity + brief)
   const gmailSection = formatGmailTransactionsForBrief(gmailTransactions);
   const fidelitySection = formatFidelityAlerts(fidelityAlerts);
   const balanceSection = formatBalanceVerification(balanceVerification);
   const briefText = formatBriefAsWhatsApp(brief);
 
-  const sections = [gmailSection, fidelitySection, balanceSection, briefText]
+  const message = [gmailSection, fidelitySection, balanceSection, briefText]
     .filter(s => s.trim().length > 0)
     .join("\n");
 
-  console.log("\n" + sections);
-
-  // Step 7: Send WhatsApp (if configured)
-  if (config.sendWhatsApp) {
-    console.log("\n[STEP 7] Sending WhatsApp message...");
-    await sendWhatsApp(sections);
-    console.log("[WHATSAPP] Message sent successfully");
-  } else {
-    console.log("\n[WHATSAPP] Skipped (sendWhatsApp=false)");
-  }
-
-  // Summary
   console.log("\n" + "═".repeat(40));
-  console.log("[CAPITAL PILOT] Daily brief complete");
-  console.log(
-    `[SUMMARY] Budget: ${budgetPacing.status} | Market: ${brief.marketSummary.overallSignal} | ` +
-    `Actions: ${recommendations.length} | Discover: ${gmailTransactions.length} | Fidelity: ${fidelityAlerts.length}`
-  );
+  console.log("[CAPITAL PILOT] Brief assembled — output delivered via OpenClaw cron announce");
+  console.log(`[SUMMARY] Budget: ${budgetPacing.status} | Market: ${brief.marketSummary.overallSignal} | ` +
+    `Actions: ${recommendations.length} | Discover: ${gmailTransactions.length} | Fidelity: ${fidelityAlerts.length}`);
 
   if (hasHighPriorityItems(brief)) {
     console.log("[ALERT] High-priority items detected — requires confirmation");
   }
 
-  return sections;
-}
+  // Print brief to stdout so OpenClaw cron announce picks it up
+  console.log("\n" + message);
 
-/**
- * Send WhatsApp message via OpenClaw webhook
- */
-async function sendWhatsApp(message: string): Promise<void> {
-  const secret = process.env.WHATSAPP_WEBHOOK_SECRET;
-  if (!secret || secret === "[PASTE_YOUR_SECRET_HERE]") {
-    console.log("[WHATSAPP] No webhook secret configured — skipping send");
-    console.log("[WHATSAPP] Message preview:", message.slice(0, 200), "...");
-    return;
-  }
-
-  console.log("[WHATSAPP] Would send message of length:", message.length);
+  return message;
 }
 
 /**
  * Standalone CLI for testing
  *
  * Flags:
- *   --live        Use real data (CSV parsing + live Yahoo Finance prices + Gmail)
- *   --send        Actually send WhatsApp message
+ *   --live        Use real data (CSV + live Yahoo Finance prices + Gmail scan)
  *   --mock        Use mock data (default)
  *   --no-gmail    Skip Gmail scan
+ *
+ * Output goes to stdout — OpenClaw cron handles Telegram delivery.
  */
 async function main() {
   const args = process.argv.slice(2);
   const config: Config = {
     useMockData: !args.includes("--live"),
-    sendWhatsApp: args.includes("--send"),
     useGmail: !args.includes("--no-gmail"),
   };
 
