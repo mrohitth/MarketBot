@@ -7,11 +7,11 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsc --watch",
-    "test": "node --loader ts-node/esm src/index.ts --mock",
-    "test:daily": "node --loader ts-node/esm src/index.ts --mock",
-    "test:live": "node --loader ts-node/esm src/index.ts --live",
+    "test": "node dist/index.js --mock",
+    "test:daily": "node dist/index.js --mock",
+    "test:live": "node dist/index.js --live",
     "import:discover": "node dist/scripts/import-discover.js",
-    "test:verbose": "node --loader ts-node/esm src/index.ts --mock --verbose"
+    "test:verbose": "node dist/index.js --mock --verbose"
   },
   "keywords": ["finance", "investing", "portfolio", "budget"],
   "author": "mrohitth",

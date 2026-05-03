@@ -187,9 +187,19 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
  * In production, this would use OpenClaw's WhatsApp integration
  */
 async function sendWhatsApp(message: string): Promise<void> {
-  // Placeholder for WhatsApp integration
-  // In production: use OpenClaw's cron/webhook system
+  // In production: use OpenClaw's cron/webhook system or direct messaging
+  // For now, we'll use the OpenClaw sessions_send or cron to deliver to WhatsApp
+  
+  // Get WhatsApp webhook secret from env
+  const secret = process.env.WHATSAPP_WEBHOOK_SECRET;
+  if (!secret || secret === "[PASTE_YOUR_SECRET_HERE]") {
+    console.log("[WHATSAPP] No webhook secret configured — skipping send");
+    console.log("[WHATSAPP] Message preview:", message.slice(0, 200), "...");
+    return;
+  }
+  
   console.log("[WHATSAPP] Would send message of length:", message.length);
+  console.log("[WHATSAPP] To enable: set WHATSAPP_WEBHOOK_SECRET in .env");
 }
 
 /**

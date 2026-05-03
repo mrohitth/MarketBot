@@ -123,6 +123,7 @@ The Capital Pilot is an automated financial strategist that bridges daily spendi
 |-----|--------|---------|
 | `ALPHA_VANTAGE_KEY` | alpha-vantage.com (free) | Market data for NVDA, SMH, SCHG |
 | `WHATSAPP_WEBHOOK_SECRET` | OpenClaw config | WhatsApp delivery |
+| `PORTFOLIO_TOTAL` | Your total portfolio value | For cash % calculation |
 
 ---
 
