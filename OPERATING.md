@@ -10,10 +10,35 @@ Copy `.env.example` to `.env` and fill in:
 
 ```
 ALPHA_VANTAGE_API_KEY=[GET_FROM_ALPHAVANTAGE_CO_FREE]
-MONTHLY_NET_INCOME=[YOUR_NET_MONTHLY_INCOME]
-WHATSAPP_WEBHOOK_SECRET=[FROM_OPENCLAW_CONFIG]
-PORTFOLIO_TOTAL=[TOTAL_PORTFOLIO_VALUE_FOR_CASH_CALC]
+MONTHLY_NET_INCOME=8500
+PORTFOLIO_TOTAL=850000
+GMAIL_USER=mathew.rohit.thomson@gmail.com
+GMAIL_APP_PASSWORD=[GMAIL_APP_PASSWORD_FOR_IMAP]
+WHATSAPP_WEBHOOK_SECRET=[FROM_OPENCLAW_WHATSAPP_CHANNEL]
+DISCOVER_CSV_PATH=./data/discover-transactions.csv
 ```
+
+**Gmail App Password:** Create at Google Account → Security → 2-Step Verification → App Passwords. Required for IMAP access to scan Fidelity trade confirmation emails.
+
+---
+
+## Portfolio Baseline (from Fidelity Email Extraction — 2026-05-03)
+
+The following holdings were discovered from Fidelity trade confirmation emails. Share counts must be entered manually from the Fidelity account dashboard.
+
+| Ticker | Name | Avg Cost | Current Price | Trades |
+|--------|------|----------|---------------|--------|
+| NVDA | NVIDIA Corporation | ~$203 | $198.45 | 3 trades (Apr 8, 2026) |
+| SMH | VanEck Semiconductor ETF | ~$494 | $509.82 | 1 trade (Apr 8, 2026) |
+| SCHG | Schwab US Large-Cap Growth ETF | ~$30 | $33.14 | 5 trades (Apr 8, 2026) |
+| QQQ | Invesco QQQ Trust | ~$597 | $674.15 | 4 trades (Apr 8, 2026) |
+| SCHD | Schwab Dividend Equity ETF | ~$31 | $31.86 | 5 trades (Apr 8, 2026) |
+| VXUS | Vanguard Total International Stock ETF | ~$78 | $82.97 | 5 trades (Apr 8, 2026) |
+| VOOG | Vanguard S&P 500 Growth ETF | ~$425 | $78.46 | 2 trades (Apr 8, 2026) |
+
+**Target allocation:** NVDA 40%, SMH 30%, SCHG 20%, CASH 10%
+
+**Brokerage account:** Fidelity Investments (Account XXXXX8015)
 
 ---
 
@@ -50,14 +75,7 @@ npm run test:daily   # Uses mock data, no API calls
 npm run test:live    # Pulls real prices from Alpha Vantage
 ```
 
-**Schedule:** 8:00 AM EST daily via OpenClaw cron:
-```json
-{
-  "name": "Capital Pilot Daily Brief",
-  "schedule": { "kind": "cron", "expr": "0 8 * * *", "tz": "America/New_York" },
-  "payload": { "kind": "agentTurn", "message": "Run MarketBot: node MarketBot/dist/index.js --live --send" }
-}
-```
+**Schedule:** 8:00 AM EST daily via OpenClaw cron.
 
 ---
 
@@ -104,10 +122,13 @@ If no Alpha Vantage key, the system gracefully falls back to mock data:
 | `src/index.ts` | Main orchestrator — start here |
 | `src/lib/budget.ts` | CSV parsing, budget pacing |
 | `src/lib/market.ts` | Alpha Vantage, drift calc |
+| `src/lib/fidelity.ts` | Gmail/Fidelity email scanner for trade confirmation context |
 | `src/lib/profitMaximizer.ts` | Sector scanner |
 | `src/lib/brief.ts` | WhatsApp message formatter |
 | `src/lib/types.ts` | All interfaces |
-| `data/discover-transactions.csv` | Weekly upload |
+| `data/portfolio.json` | Static portfolio positions with costs (share counts must be entered) |
+| `data/portfolio-context.md` | Full portfolio baseline from email extraction |
+| `data/discover-transactions.csv` | Weekly Discover CSV upload |
 
 ---
 
