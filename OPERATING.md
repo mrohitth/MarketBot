@@ -75,7 +75,7 @@ npm run test:daily   # Uses mock data, no API calls
 npm run test:live    # Pulls real prices from Alpha Vantage
 ```
 
-**Schedule:** 8:00 AM EST daily via OpenClaw cron.
+**Schedule:** 8:00 AM EST daily via OpenClaw cron (✅ verified 2026-05-03 — brief delivered to Telegram)
 
 ---
 
