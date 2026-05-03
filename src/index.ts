@@ -1,3 +1,46 @@
+import * as fs from "fs";
+import * as path from "path";
+
+/**
+ * Load environment variables from .env file
+ * Works around dotenv issues with undefined values after config()
+ */
+function loadEnv(): void {
+  // Always use process.cwd() which is /home/mathew/MarketBot when running from the project root
+  const basePath = process.cwd();
+  const envPath = path.join(basePath, ".env");
+  
+  if (!fs.existsSync(envPath)) {
+    console.warn("[ENV] .env file not found at:", envPath);
+    return;
+  }
+  
+  const content = fs.readFileSync(envPath, "utf8");
+  const lines = content.split("\n");
+  
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    
+    const eqIndex = trimmed.indexOf("=");
+    if (eqIndex === -1) continue;
+    
+    const key = trimmed.substring(0, eqIndex).trim();
+    const value = trimmed.substring(eqIndex + 1).trim();
+    
+    // Map .env key names to code expected names
+    const envKey = key === "ALPHA_VANTAGE_API_KEY" ? "ALPHA_VANTAGE_KEY" : key;
+    
+    if (!process.env[envKey]) {
+      process.env[envKey] = value;
+    }
+  }
+  
+  console.log("[ENV] Loaded environment from .env");
+}
+
+loadEnv();
+
 import { 
   Transaction, 
   BudgetLimits, 
@@ -34,7 +77,6 @@ import {
   GmailTransaction,
   gmailToTransaction
 } from "./lib/gmail";
-import * as path from "path";
 
 // === Configuration ===
 
@@ -63,9 +105,9 @@ interface Config {
 }
 
 const DEFAULT_CONFIG: Config = {
-  useMockData: true,  // Set to false to use real APIs
+  useMockData: true,
   sendWhatsApp: false,
-  useGmail: false,    // Set to true to enable Gmail scanning
+  useGmail: false,
 };
 
 /**
@@ -87,7 +129,6 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
       console.error("[GMAIL] Failed to scan Gmail:", error);
     }
   } else if (config.useMockData) {
-    // Use mock Gmail data for testing
     gmailTransactions = getMockGmailTransactions();
     console.log(`[GMAIL] Using ${gmailTransactions.length} mock alerts`);
   }
@@ -189,7 +230,7 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
     positions,
     recommendations,
     profitMaximizer,
-    85000 * 0.1 // Cash available = 10% of $850k portfolio
+    MONTHLY_NET_INCOME * 0.1 // Cash available = 10% of monthly income
   );
 
   // Add Gmail alerts to brief output

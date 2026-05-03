@@ -17,10 +17,11 @@ The Capital Pilot is an automated financial strategist that bridges daily spendi
 
 ### Core Capabilities
 
-1. **Budget Pacing Report (CSV + Gmail Hybrid)**
-   - Weekly CSV import from Discover (sourced from `data/discover-transactions.csv`)
-   - Real-time Gmail scanning for Discover transaction alerts (service@email.discover.com)
+1. **Budget Pacing Report (Real-time Hybrid — Gmail + CSV Audit)**
+   - Real-time Gmail scanning for Discover transaction alerts (imap.gmail.com)
+   - Search criteria: From `discover.com`, Subject contains "Alert"
    - Deduplication: CSV takes priority over Gmail (CSV is audited record)
+   - Fallback: Weekly Discover CSV import to `data/discover-transactions.csv`
    - Alert thresholds: 80% warning, 100% exceeded
 
 2. **Market Scan**

@@ -13,14 +13,21 @@
     "import:discover": "node dist/scripts/import-discover.js",
     "test:verbose": "node dist/index.js --mock --verbose"
   },
-  "keywords": ["finance", "investing", "portfolio", "budget"],
+  "keywords": [
+    "finance",
+    "investing",
+    "portfolio",
+    "budget"
+  ],
   "author": "mrohitth",
   "license": "ISC",
   "dependencies": {
     "dotenv": "^16.0.0",
+    "imap": "^0.8.19",
     "node-cron": "^3.0.0"
   },
   "devDependencies": {
+    "@types/imap": "^0.8.43",
     "@types/node": "^20.0.0",
     "@types/node-cron": "^3.0.0",
     "ts-node": "^10.9.0",
