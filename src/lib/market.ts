@@ -1,10 +1,6 @@
-import { MarketData, Position, PortfolioTargets, DriftThresholds, TradeRecommendation } from "./types";
+import { MarketData, Position, PortfolioTargets, DriftThresholds, TradeRecommendation, TICKERS, MACRO_TICKERS, SECTOR_TICKERS } from "./types";
 
-const TICKERS = ["NVDA", "SMH", "SCHG"] as const;
-export { TICKERS };
 const LAST_KNOWN_PRICES_PATH = "./data/last-known-prices.json";
-
-// === Yahoo Finance Integration ===
 
 import * as fs from "fs";
 import * as path from "path";
@@ -13,9 +9,6 @@ interface LastKnownPrices {
   [ticker: string]: { price: number; date: string };
 }
 
-/**
- * Load last-known prices from fallback file
- */
 export function loadLastKnownPrices(): LastKnownPrices {
   const filePath = path.resolve(LAST_KNOWN_PRICES_PATH);
   if (!fs.existsSync(filePath)) return {};
@@ -26,88 +19,56 @@ export function loadLastKnownPrices(): LastKnownPrices {
   }
 }
 
-/**
- * Save last-known prices to fallback file
- */
 export function saveLastKnownPrices(prices: LastKnownPrices): void {
   const filePath = path.resolve(LAST_KNOWN_PRICES_PATH);
   fs.writeFileSync(filePath, JSON.stringify(prices, null, 2));
   console.log(`[MARKET] Saved last-known prices to ${filePath}`);
 }
 
-/**
- * Fetch quotes for all tickers in a single batch using Yahoo Finance
- * Retries once on failure, then falls back to last-known prices
- */
-export async function getBatchQuotes(): Promise<Map<string, MarketData>> {
+async function fetchQuotesForTickers(tickers: readonly string[]): Promise<Map<string, MarketData>> {
   const quotes = new Map<string, MarketData>();
   const lastKnown = loadLastKnownPrices();
-  const errors: string[] = [];
 
-  // Attempt 1: Live fetch via Yahoo Finance
-  for (const ticker of TICKERS) {
+  for (const ticker of tickers) {
     const quote = await fetchWithRetry(ticker);
     if (quote) {
       quotes.set(ticker, quote);
     } else {
-      errors.push(ticker);
-    }
-  }
-
-  // Attempt 2: Retry failed tickers once
-  if (errors.length > 0) {
-    console.log(`[MARKET] Retrying ${errors.length} failed ticker(s): ${errors.join(", ")}`);
-    const retryErrors: string[] = [];
-    for (const ticker of errors) {
-      const quote = await fetchWithRetry(ticker);
-      if (quote) {
-        quotes.set(ticker, quote);
-      } else {
-        retryErrors.push(ticker);
-      }
-    }
-
-    // Fallback: Last-known prices for any remaining failures
-    if (retryErrors.length > 0) {
-      console.warn(`[MARKET] Falling back to last-known prices for: ${retryErrors.join(", ")}`);
-      for (const ticker of retryErrors) {
-        const lkp = lastKnown[ticker];
-        if (lkp) {
-          console.warn(`[MARKET] ${ticker}: using last known price $${lkp.price.toFixed(2)} from ${lkp.date}`);
-          quotes.set(ticker, {
-            ticker,
-            price: lkp.price,
-            previousClose: lkp.price,
-            change: 0,
-            changePercent: 0,
-            rsi: 50,
-            ma20: lkp.price,
-            ma50: lkp.price,
-            volume: 0,
-            volumeAvg: 0,
-            status: "neutral",
-            signals: ["fallback_ price"],
-          });
-        } else {
-          console.error(`[MARKET] No last-known price for ${ticker} — cannot populate`);
-        }
+      const lkp = lastKnown[ticker];
+      if (lkp) {
+        quotes.set(ticker, {
+          ticker,
+          price: lkp.price,
+          previousClose: lkp.price,
+          change: 0,
+          changePercent: 0,
+          rsi: 50,
+          ma20: lkp.price,
+          ma50: lkp.price,
+          volume: 0,
+          volumeAvg: 0,
+          status: "neutral",
+          signals: ["fallback_price"],
+        });
       }
     }
   }
-
-  // Persist current prices as new last-known
-  const toSave: LastKnownPrices = {};
-  for (const [ticker, quote] of quotes) {
-    toSave[ticker] = { price: quote.price, date: new Date().toISOString().split("T")[0] };
-  }
-  saveLastKnownPrices(toSave);
 
   return quotes;
 }
 
-/**
- * Single fetch with one retry on failure (returns null on persistent failure)
- */
+export async function getBatchQuotes(): Promise<Map<string, MarketData>> {
+  return fetchQuotesForTickers(TICKERS);
+}
+
+export async function getMacroQuotes(): Promise<Map<string, MarketData>> {
+  return fetchQuotesForTickers(MACRO_TICKERS);
+}
+
+export async function getSectorQuotes(): Promise<Map<string, MarketData>> {
+  return fetchQuotesForTickers(SECTOR_TICKERS);
+}
+
 async function fetchWithRetry(ticker: string, attempt = 1): Promise<MarketData | null> {
   try {
     const mod = await import("yahoo-finance2");
@@ -120,8 +81,9 @@ async function fetchWithRetry(ticker: string, attempt = 1): Promise<MarketData |
 
     const result = await yahooFinance.quote(ticker);
     if (!result || typeof result.regularMarketPrice !== "number") {
-      console.warn(`[MARKET] ${ticker}: no valid quote result (attempt ${attempt})`);
-      return attempt < 2 ? new Promise(r => setTimeout(() => r(fetchWithRetry(ticker, 2)), 1000)) : null;
+      return attempt < 2
+        ? new Promise(r => setTimeout(() => r(fetchWithRetry(ticker, 2)), 1000))
+        : null;
     }
 
     const price = result.regularMarketPrice;
@@ -130,10 +92,22 @@ async function fetchWithRetry(ticker: string, attempt = 1): Promise<MarketData |
     const changePercent = result.regularMarketChangePercent ?? 0;
     const volume = result.regularMarketVolume ?? 0;
     const volumeAvg = result.averageDailyVolume10Week ?? volume;
+    const rsi = 50;
+    const ma20 = result.fiftyDayAverage ?? price;
+    const ma50 = result.twoHundredDayAverage ?? price;
 
     let status: "bull" | "bear" | "neutral" = "neutral";
     if (changePercent > 1) status = "bull";
     else if (changePercent < -1) status = "bear";
+
+    const signals: string[] = [];
+    if (price > ma20) signals.push("above_ma20");
+    if (price < ma20) signals.push("below_ma20");
+    if (price > ma50) signals.push("above_ma50");
+    if (price < ma50) signals.push("below_ma50");
+    if (volume > volumeAvg * 1.5) signals.push("volume_spike");
+    if (rsi < 30) signals.push("rsi_oversold");
+    else if (rsi > 70) signals.push("rsi_overbought");
 
     return {
       ticker,
@@ -141,13 +115,13 @@ async function fetchWithRetry(ticker: string, attempt = 1): Promise<MarketData |
       previousClose: prevClose,
       change,
       changePercent,
-      rsi: 50, // Yahoo Finance does not provide RSI; can be extended
-      ma20: result.fiftyDayAverage ?? price,
-      ma50: result.twoHundredDayAverage ?? price,
+      rsi,
+      ma20,
+      ma50,
       volume,
       volumeAvg,
       status,
-      signals: [],
+      signals,
     };
   } catch (error) {
     console.error(`[MARKET] ${ticker}: fetch failed (attempt ${attempt}):`, error);
@@ -157,99 +131,11 @@ async function fetchWithRetry(ticker: string, attempt = 1): Promise<MarketData |
   }
 }
 
-// === Alpha Vantage (retained for RSI — deprecated for price feeds) ===
-
-const ALPHA_VANTAGE_BASE = "https://www.alphavantage.co/query";
-const GLOBAL_QUOTE_ENDPOINT = "GLOBAL_QUOTE";
-const RSI_ENDPOINT = "RSI";
-
-/**
- * Fetch real-time quote from Alpha Vantage (deprecated — use getBatchQuotes)
- * @deprecated
- */
-export async function getQuote(symbol: string, apiKey: string): Promise<MarketData | null> {
-  const url = `${ALPHA_VANTAGE_BASE}?function=${GLOBAL_QUOTE_ENDPOINT}&symbol=${symbol}&apikey=${apiKey}`;
-
-  try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-    const data = await res.json() as {
-      "Global Quote": {
-        "05. price": string;
-        "08. previous close": string;
-        "09. change": string;
-        "10. change percent": string;
-        "06. volume": string;
-      };
-    };
-    const quote = data["Global Quote"];
-
-    if (!quote || !quote["05. price"]) {
-      console.warn(`[MARKET] No quote data for ${symbol}`);
-      return null;
-    }
-
-    const price = parseFloat(quote["05. price"]);
-    const prevClose = parseFloat(quote["08. previous close"]);
-    const change = parseFloat(quote["09. change"]);
-    const changePercent = parseFloat(quote["10. change percent"].replace("%", ""));
-
-    return {
-      ticker: symbol,
-      price,
-      previousClose: prevClose,
-      change,
-      changePercent,
-      rsi: 50,
-      ma20: price,
-      ma50: price,
-      volume: parseInt(quote["06. volume"]),
-      volumeAvg: parseInt(quote["06. volume"]),
-      status: changePercent > 1 ? "bull" : changePercent < -1 ? "bear" : "neutral",
-      signals: [],
-    };
-  } catch (error) {
-    console.error(`[MARKET] Failed to fetch ${symbol}:`, error);
-    return null;
-  }
-}
-
-/**
- * Get RSI for a symbol (14-day default)
- */
-export async function getRSI(symbol: string, apiKey: string, interval: string = "daily", timePeriod: number = 14): Promise<number | null> {
-  const url = `${ALPHA_VANTAGE_BASE}?function=${RSI_ENDPOINT}&symbol=${symbol}&interval=${interval}&time_period=${timePeriod}&series_type=close&apikey=${apiKey}`;
-
-  try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-    const data = await res.json() as {
-      "Technical Analysis: RSI": { data: Array<{ date: string; RSI: string }> };
-    };
-    const rsiData = data["Technical Analysis: RSI"];
-
-    if (!rsiData || !rsiData["data"] || rsiData["data"].length === 0) {
-      return null;
-    }
-
-    const latest = rsiData["data"][0];
-    return parseFloat(latest["RSI"]);
-  } catch (error) {
-    console.error(`[MARKET] Failed to fetch RSI for ${symbol}:`, error);
-    return null;
-  }
-}
-
 // === Portfolio Calculations ===
 
-/**
- * Calculate current portfolio positions with drift
- */
 export function calculatePositions(
   quotes: Map<string, MarketData>,
-  holdings: Map<string, number>, // shares
+  holdings: Map<string, number>,
   targets: PortfolioTargets,
   thresholds: DriftThresholds
 ): Position[] {
@@ -258,12 +144,8 @@ export function calculatePositions(
 
   for (const [ticker, shares] of holdings) {
     const quote = quotes.get(ticker);
-    if (!quote) continue;
-    totalValue += quote.price * shares;
+    if (quote) totalValue += quote.price * shares;
   }
-
-  const cashPosition = 85000 * 0.1;
-  totalValue += cashPosition;
 
   for (const [ticker, shares] of holdings) {
     const quote = quotes.get(ticker);
@@ -271,19 +153,16 @@ export function calculatePositions(
 
     const marketValue = quote.price * shares;
     const targetKey = ticker as keyof PortfolioTargets;
-    const targetWeight = targets[targetKey] || 0.1;
+    const targetWeight = targets[targetKey] || 0.05;
     const currentWeight = marketValue / totalValue;
-    const drift = ((currentWeight - targetWeight) / targetWeight) * 100;
+    const drift = targetWeight > 0 ? ((currentWeight - targetWeight) / targetWeight) * 100 : 0;
 
-    let status: "on-target" | "drifted" | "black-swan" = "on-target";
     const thresholdKey = ticker as keyof DriftThresholds;
     const driftThreshold = thresholds[thresholdKey] || 5;
 
-    if (Math.abs(quote.changePercent) > 8) {
-      status = "black-swan";
-    } else if (Math.abs(drift) > driftThreshold) {
-      status = "drifted";
-    }
+    let status: "on-target" | "drifted" | "black-swan" = "on-target";
+    if (Math.abs(quote.changePercent) > 8) status = "black-swan";
+    else if (Math.abs(drift) > driftThreshold) status = "drifted";
 
     positions.push({
       ticker,
@@ -303,9 +182,6 @@ export function calculatePositions(
   return positions;
 }
 
-/**
- * Generate trade recommendations based on drift
- */
 export function generateRebalanceRecommendations(positions: Position[]): TradeRecommendation[] {
   const recommendations: TradeRecommendation[] = [];
 
@@ -313,24 +189,22 @@ export function generateRebalanceRecommendations(positions: Position[]): TradeRe
     if (pos.status === "drifted") {
       const action = pos.drift > 0 ? "SELL" : "BUY";
       const sharesToMove = Math.floor(Math.abs(pos.drift) * 0.5);
-
       recommendations.push({
         action,
         ticker: pos.ticker,
-        shares: sharesToMove,
+        shares: sharesToMove > 0 ? sharesToMove : undefined,
         reason: `${pos.ticker} drifted ${pos.drift.toFixed(1)}% from target (${pos.targetWeight.toFixed(0)}%)`,
         confidence: "medium",
         requiresConfirmation: false,
         type: "rebalance",
       });
     }
-
     if (pos.status === "black-swan") {
       recommendations.push({
         action: "HOLD",
         ticker: pos.ticker,
         dollarAmount: Math.abs(pos.dayChange),
-        reason: `Black swan event: ${pos.ticker} ${pos.dayChangePercent.toFixed(1)}%. Confirm before action.`,
+        reason: `Black swan: ${pos.ticker} ${pos.dayChangePercent.toFixed(1)}%. Confirm before action.`,
         confidence: "high",
         requiresConfirmation: true,
         type: "black-swan",
@@ -341,24 +215,14 @@ export function generateRebalanceRecommendations(positions: Position[]): TradeRe
   return recommendations;
 }
 
-/**
- * Format market summary for WhatsApp
- */
 export function formatMarketSummary(quotes: Map<string, MarketData>): { text: string; biggestMover: { ticker: string; change: number } } {
-  let output = `📈 *MARKET SUMMARY*\n`;
-
+  let output = `📈 *MARKET*\n`;
   let biggestMover = { ticker: "", change: 0 };
 
-  for (const ticker of TICKERS) {
-    const quote = quotes.get(ticker);
-    if (!quote) {
-      output += `${ticker}: N/A\n`;
-      continue;
-    }
-
+  for (const [ticker, quote] of quotes) {
     const emoji = quote.changePercent > 2 ? "🟢" : quote.changePercent < -2 ? "🔴" : "🟡";
-    output += `${emoji} ${ticker}: $${quote.price.toFixed(2)} (${quote.changePercent > 0 ? "+" : ""}${quote.changePercent.toFixed(2)}%)\n`;
-
+    const sign = quote.changePercent > 0 ? "+" : "";
+    output += `${emoji} ${ticker}: $${quote.price.toFixed(2)} (${sign}${quote.changePercent.toFixed(2)}%)\n`;
     if (Math.abs(quote.changePercent) > Math.abs(biggestMover.change)) {
       biggestMover = { ticker, change: quote.changePercent };
     }
@@ -367,92 +231,44 @@ export function formatMarketSummary(quotes: Map<string, MarketData>): { text: st
   return { text: output, biggestMover };
 }
 
-/**
- * Format positions for WhatsApp
- */
 export function formatPositionsForBrief(positions: Position[]): string {
   let output = `💼 *PORTFOLIO*\n`;
 
   for (const pos of positions) {
-    const driftEmoji = pos.drift > 2 ? "📈" : pos.drift < -2 ? "📉" : "➖";
     const statusEmoji = pos.status === "black-swan" ? "⚠️" : pos.status === "drifted" ? "🔄" : "✅";
-
-    output += `${statusEmoji} ${pos.ticker}: $${pos.marketValue.toFixed(0)} (${pos.weight.toFixed(1)}%) ${driftEmoji} ${pos.drift > 0 ? "+" : ""}${pos.drift.toFixed(1)}% | $${pos.currentPrice.toFixed(2)}\n`;
+    const driftSign = pos.drift > 0 ? "+" : "";
+    output += `${statusEmoji} ${pos.ticker}: $${pos.marketValue.toFixed(0)} (${pos.weight.toFixed(1)}%) 📉 ${driftSign}${pos.drift.toFixed(1)}% | $${pos.currentPrice.toFixed(2)}\n`;
   }
 
   return output;
 }
 
-// === Mock Data for Testing ===
+// === Mock Data ===
 
 export function getMockQuotes(): Map<string, MarketData> {
   const quotes = new Map<string, MarketData>();
-
-  quotes.set("NVDA", {
-    ticker: "NVDA",
-    price: 120.50,
-    previousClose: 127.00,
-    change: -6.50,
-    changePercent: -5.12,
-    rsi: 55,
-    ma20: 125.00,
-    ma50: 120.00,
-    volume: 45000000,
-    volumeAvg: 40000000,
-    status: "bear",
-    signals: ["below_ma20", "high_volume"],
-  });
-
-  quotes.set("SMH", {
-    ticker: "SMH",
-    price: 178.25,
-    previousClose: 183.50,
-    change: -5.25,
-    changePercent: -2.86,
-    rsi: 48,
-    ma20: 182.00,
-    ma50: 180.00,
-    volume: 8500000,
-    volumeAvg: 9000000,
-    status: "neutral",
-    signals: ["below_ma50"],
-  });
-
-  quotes.set("SCHG", {
-    ticker: "SCHG",
-    price: 94.80,
-    previousClose: 94.50,
-    change: 0.30,
-    changePercent: 0.32,
-    rsi: 58,
-    ma20: 93.50,
-    ma50: 92.00,
-    volume: 3200000,
-    volumeAvg: 3000000,
-    status: "bull",
-    signals: ["above_ma20", "above_ma50"],
-  });
-
+  const tickers: Array<[string, MarketData]> = [
+    ["VTI", { ticker: "VTI", price: 260.00, previousClose: 257.00, change: 3.00, changePercent: 1.17, rsi: 55, ma20: 258.00, ma50: 255.00, volume: 3000000, volumeAvg: 2800000, status: "bull", signals: ["above_ma20"] }],
+    ["NVDA", { ticker: "NVDA", price: 198.45, previousClose: 202.00, change: -3.55, changePercent: -1.76, rsi: 52, ma20: 205.00, ma50: 210.00, volume: 42000000, volumeAvg: 40000000, status: "bear", signals: ["below_ma20", "below_ma50"] }],
+    ["VOO", { ticker: "VOO", price: 450.00, previousClose: 447.00, change: 3.00, changePercent: 0.67, rsi: 58, ma20: 448.00, ma50: 445.00, volume: 3000000, volumeAvg: 3200000, status: "neutral", signals: ["above_ma20"] }],
+    ["QQQ", { ticker: "QQQ", price: 674.15, previousClose: 670.00, change: 4.15, changePercent: 0.62, rsi: 60, ma20: 668.00, ma50: 660.00, volume: 45000000, volumeAvg: 42000000, status: "bull", signals: ["above_ma20"] }],
+    ["SMH", { ticker: "SMH", price: 522.69, previousClose: 515.00, change: 7.69, changePercent: 1.49, rsi: 58, ma20: 520.00, ma50: 515.00, volume: 8500000, volumeAvg: 9000000, status: "bull", signals: ["above_ma20"] }],
+    ["SCHG", { ticker: "SCHG", price: 33.14, previousClose: 32.90, change: 0.24, changePercent: 0.73, rsi: 56, ma20: 33.00, ma50: 32.50, volume: 3200000, volumeAvg: 3000000, status: "bull", signals: ["above_ma20"] }],
+    ["VXUS", { ticker: "VXUS", price: 82.97, previousClose: 82.00, change: 0.97, changePercent: 1.18, rsi: 54, ma20: 82.00, ma50: 81.00, volume: 4500000, volumeAvg: 4200000, status: "bull", signals: ["above_ma20"] }],
+    ["SCHD", { ticker: "SCHD", price: 31.86, previousClose: 31.50, change: 0.36, changePercent: 1.14, rsi: 57, ma20: 31.50, ma50: 31.00, volume: 5200000, volumeAvg: 5000000, status: "bull", signals: ["above_ma20"] }],
+    ["SPYD", { ticker: "SPYD", price: 45.00, previousClose: 44.50, change: 0.50, changePercent: 1.12, rsi: 53, ma20: 44.80, ma50: 44.20, volume: 400000, volumeAvg: 380000, status: "bull", signals: ["above_ma20"] }],
+    ["ASTS", { ticker: "ASTS", price: 10.00, previousClose: 11.00, change: -1.00, changePercent: -9.09, rsi: 38, ma20: 11.50, ma50: 12.00, volume: 1500000, volumeAvg: 1200000, status: "bear", signals: ["below_ma20", "rsi_oversold"] }],
+  ];
+  for (const [ticker, data] of tickers) quotes.set(ticker, data);
   return quotes;
 }
 
 export function getMockHoldings(): Map<string, number> {
   const holdings = new Map<string, number>();
-  holdings.set("NVDA", 100);
-  holdings.set("SMH", 75);
-  holdings.set("SCHG", 50);
+  const entries: Array<[string, number]> = [
+    ["VTI", 34], ["NVDA", 41.6], ["VOO", 17.1], ["QQQ", 9.4], ["SMH", 8.1],
+    ["SCHG", 102.4], ["VXUS", 29.7], ["SCHD", 75.2], ["SPYD", 3.7], ["ASTS", 8.7],
+  ];
+  for (const [ticker, shares] of entries) holdings.set(ticker, shares);
   return holdings;
 }
-
-export const MOCK_TARGETS: PortfolioTargets = {
-  NVDA: 0.40,
-  SMH: 0.30,
-  SCHG: 0.20,
-  CASH: 0.10,
-};
-
-export const MOCK_DRIFT_THRESHOLDS: DriftThresholds = {
-  NVDA: 7,
-  SMH: 7,
-  SCHG: 5,
-};

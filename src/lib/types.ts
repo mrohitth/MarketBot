@@ -1,17 +1,17 @@
 // === Core Types ===
 
 export interface Transaction {
-  date: string;           // YYYY-MM-DD
+  date: string;
   description: string;
-  amount: number;         // Negative for purchases, positive for income
-  category: string;       // "Dining", "Housing", "Discretionary", etc.
+  amount: number;
+  category: string;
   merchant?: string;
 }
 
 export interface BudgetCategory {
   name: string;
-  limit: number;          // Monthly limit
-  alertThreshold: number; // 0.8 = 80%
+  limit: number;
+  alertThreshold: number;
   spent: number;
   remaining: number;
   percentUsed: number;
@@ -19,11 +19,11 @@ export interface BudgetCategory {
 }
 
 export interface BudgetPacingReport {
-  month: string;          // "2026-05"
+  month: string;
   totalBudget: number;
   totalSpent: number;
   categories: BudgetCategory[];
-  savingsRate: number;    // Percentage of income saved
+  savingsRate: number;
   status: "on-track" | "over-budget" | "under-budget";
 }
 
@@ -35,9 +35,9 @@ export interface Position {
   marketValue: number;
   dayChange: number;
   dayChangePercent: number;
-  weight: number;         // Portfolio percentage
-  targetWeight: number;    // Target allocation
-  drift: number;          // Deviation from target (%)
+  weight: number;
+  targetWeight: number;
+  drift: number;
   status: "on-target" | "drifted" | "black-swan";
 }
 
@@ -47,13 +47,13 @@ export interface MarketData {
   previousClose: number;
   change: number;
   changePercent: number;
-  rsi: number;           // 14-day RSI
-  ma20: number;           // 20-day moving average
-  ma50: number;           // 50-day moving average
+  rsi: number;
+  ma20: number;
+  ma50: number;
   volume: number;
   volumeAvg: number;
   status: "bull" | "bear" | "neutral";
-  signals: string[];      // ["above_ma20", "rsi_overbought", etc.]
+  signals: string[];
 }
 
 export interface TradeRecommendation {
@@ -69,7 +69,7 @@ export interface TradeRecommendation {
 
 export interface ProfitMaximizerIdea {
   ticker: string;
-  setup: string;         // "RSI oversold", "Breaking MA20 with volume"
+  setup: string;
   entryPrice: number;
   targetPrice: number;
   stopLoss: number;
@@ -87,7 +87,7 @@ export interface BriefSection {
 }
 
 export interface MorningBrief {
-  date: string;           // Today's date
+  date: string;
   liquidity: {
     cashAvailable: number;
     cashTarget: number;
@@ -109,31 +109,39 @@ export interface MorningBrief {
   }[];
 }
 
-// === API Response Types ===
+// === Configuration Types ===
 
-export interface AlphaVantageQuoteResponse {
-  "Global Quote": {
-    "01. symbol": string;
-    "02. open": string;
-    "03. high": string;
-    "04. low": string;
-    "05. price": string;
-    "06. volume": string;
-    "07. latest trading day": string;
-    "08. previous close": string;
-    "09. change": string;
-    "10. change percent": string;
-  };
+export interface PortfolioTargets {
+  VTI: number; NVDA: number; VOO: number; QQQ: number;
+  SMH: number; SCHG: number; VXUS: number; SCHD: number;
+  SPYD: number; ASTS: number; CASH: number;
 }
 
-export interface AlphaVantageRSIResponse {
-  "Technical Analysis: RSI": {
-    "data": Array<{
-      "date": string;
-      "RSI": string;
-    }>;
-  };
+export interface DriftThresholds {
+  VTI: number; NVDA: number; VOO: number; QQQ: number;
+  SMH: number; SCHG: number; VXUS: number; SCHD: number;
+  SPYD: number; ASTS: number;
 }
+
+// === Tickers ===
+
+export const PORTFOLIO_TICKERS = ["VTI", "NVDA", "VOO", "QQQ", "SMH", "SCHG", "VXUS", "SCHD", "SPYD", "ASTS"] as const;
+export const MACRO_TICKERS = ["SPY", "QQQ", "DXY", "TLT", "GLD"] as const;
+export const SECTOR_TICKERS = [
+  "AMD", "TSM", "ASML", "INTC", "QCOM", "AMAT", "LRCX", "MU", "SOXX", "SMH",
+  "AVGO", "MRVL", "PANW", "MPWR", "CDNS", "SNPS", "ON", "LSCC", "ENTG", "SWKS",
+] as const;
+
+export const TICKERS = PORTFOLIO_TICKERS;
+
+export const PORTFOLIO_TARGETS: PortfolioTargets = {
+  VTI: 0.20, NVDA: 0.20, VOO: 0.18, QQQ: 0.14, SMH: 0.10, SCHG: 0.08,
+  VXUS: 0.06, SCHD: 0.05, SPYD: 0.01, ASTS: 0.01, CASH: 0.07,
+};
+
+export const DRIFT_THRESHOLDS: DriftThresholds = {
+  VTI: 7, NVDA: 7, VOO: 7, QQQ: 7, SMH: 7, SCHG: 5, VXUS: 7, SCHD: 5, SPYD: 5, ASTS: 10,
+};
 
 // === Fidelity Types ===
 
@@ -146,10 +154,11 @@ export interface PortfolioStatic {
   lastUpdated: string;
   note: string;
   positions: {
-    NVDA: PortfolioEntry;
-    SMH: PortfolioEntry;
-    SCHG: PortfolioEntry;
+    VTI: PortfolioEntry; NVDA: PortfolioEntry; VOO: PortfolioEntry; QQQ: PortfolioEntry;
+    SMH: PortfolioEntry; SCHG: PortfolioEntry; VXUS: PortfolioEntry; SCHD: PortfolioEntry;
+    SPYD: PortfolioEntry; ASTS: PortfolioEntry;
   };
+  targetAllocation: PortfolioTargets;
 }
 
 export interface FidelityAlert {
@@ -172,24 +181,9 @@ export interface BalanceVerification {
   withinThreshold: boolean;
 }
 
-// === Configuration Types ===
-
 export interface BudgetLimits {
   dining: number;
   housing: number;
   discretionary: number;
   savingsRateTarget: number;
-}
-
-export interface PortfolioTargets {
-  NVDA: number;
-  SMH: number;
-  SCHG: number;
-  CASH: number;
-}
-
-export interface DriftThresholds {
-  NVDA: number;
-  SMH: number;
-  SCHG: number;
 }

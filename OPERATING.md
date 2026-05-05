@@ -1,6 +1,6 @@
 # Capital Pilot — Operating Instructions
 
-_Last updated: 2026-05-03 by Kitty_
+_Last updated: 2026-05-05 by Kitty_
 
 ---
 
@@ -9,9 +9,8 @@ _Last updated: 2026-05-03 by Kitty_
 Copy `.env.example` to `.env` and fill in:
 
 ```
-ALPHA_VANTAGE_API_KEY=[GET_FROM_ALPHAVANTAGE_CO_FREE]
 MONTHLY_NET_INCOME=8500
-PORTFOLIO_TOTAL=850000
+PORTFOLIO_TOTAL=43757.84
 GMAIL_USER=mathew.rohit.thomson@gmail.com
 GMAIL_APP_PASSWORD=[GMAIL_APP_PASSWORD_FOR_IMAP]
 # Telegram delivery handled automatically by OpenClaw cron announce
@@ -22,23 +21,45 @@ DISCOVER_CSV_PATH=./data/discover-transactions.csv
 
 ---
 
-## Portfolio Baseline (from Fidelity Email Extraction — 2026-05-03)
+## Data Sources
 
-The following holdings were discovered from Fidelity trade confirmation emails. Share counts must be entered manually from the Fidelity account dashboard.
+| Source | What it provides |
+|--------|-----------------|
+| Yahoo Finance (yahoo-finance2) | Live prices for all portfolio + sector + macro tickers |
+| Gmail/IMAP | Discover transaction alerts, Fidelity trade confirmations |
+| Discover CSV | Weekly transaction download from Discover.com |
+| `data/portfolio.json` | Static share counts (manually updated from Fidelity) |
 
-| Ticker | Name | Avg Cost | Current Price | Trades |
-|--------|------|----------|---------------|--------|
-| NVDA | NVIDIA Corporation | ~$203 | $198.45 | 3 trades (Apr 8, 2026) |
-| SMH | VanEck Semiconductor ETF | ~$494 | $509.82 | 1 trade (Apr 8, 2026) |
-| SCHG | Schwab US Large-Cap Growth ETF | ~$30 | $33.14 | 5 trades (Apr 8, 2026) |
-| QQQ | Invesco QQQ Trust | ~$597 | $674.15 | 4 trades (Apr 8, 2026) |
-| SCHD | Schwab Dividend Equity ETF | ~$31 | $31.86 | 5 trades (Apr 8, 2026) |
-| VXUS | Vanguard Total International Stock ETF | ~$78 | $82.97 | 5 trades (Apr 8, 2026) |
-| VOOG | Vanguard S&P 500 Growth ETF | ~$425 | $78.46 | 2 trades (Apr 8, 2026) |
+**No Alpha Vantage key required** — Yahoo Finance is used directly.
 
-**Target allocation:** NVDA 40%, SMH 30%, SCHG 20%, CASH 10%
+---
+
+## Portfolio Baseline (from Fidelity — 2026-05-03)
+
+| Ticker | Shares | Avg Cost | Tgt Wt |
+|--------|--------|----------|--------|
+| VTI | 34 | ~$231 | 20% |
+| NVDA | 41.6 | ~$203 | 20% |
+| VOO | 17.1 | ~$403 | 18% |
+| QQQ | 9.4 | ~$597 | 14% |
+| SMH | 8.1 | ~$494 | 10% |
+| SCHG | 102.4 | ~$30 | 8% |
+| VXUS | 29.7 | ~$73 | 6% |
+| SCHD | 75.2 | ~$29 | 5% |
+| SPYD | 3.7 | ~$41 | 1% |
+| ASTS | 8.7 | ~$11 | 1% |
 
 **Brokerage account:** Fidelity Investments (Account XXXXX8015)
+
+---
+
+## Ticker Coverage
+
+| Tier | Tickers | Purpose |
+|------|---------|---------|
+| Portfolio | VTI, NVDA, VOO, QQQ, SMH, SCHG, VXUS, SCHD, SPYD, ASTS | All 10 holdings — drift + rebalance |
+| Macro | SPY, QQQ, DXY, TLT, GLD | Market context — trend, dollar, rates, gold |
+| Sector | AMD, TSM, ASML, INTC, QCOM, AMAT, LRCX, MU, SOXX, SMH, AVGO, MRVL, PANW, MPWR, CDNS, SNPS, ON, LSCC, ENTG, SWKS | Profit Maximizer scanner (20 semi/tech stocks) |
 
 ---
 
@@ -46,7 +67,7 @@ The following holdings were discovered from Fidelity trade confirmation emails. 
 
 Mathew exports Discover transactions weekly. To import:
 
-1. Mathew downloads Discover CSV from Discover.com → Account → Spending → Export CSV
+1. Download Discover CSV from Discover.com → Account → Spending → Export CSV
 2. Save file to: `MarketBot/data/discover-transactions.csv`
 3. Filename must be `discover-transactions.csv`
 
@@ -56,26 +77,26 @@ Date,Description,Amount,Category
 2026-05-01,UBER EATS PIZZA,-45.00,Dining
 ```
 
-**Automatic import:** Add to cron or run manually:
-```bash
-npm run import:discover
-```
-
 ---
 
-## Daily Brief Generation
+## Running the Brief
 
 **Mock data (development):**
 ```bash
-npm run test:daily   # Uses mock data, no API calls
+node dist/index.js --mock
 ```
 
 **Live data (production):**
 ```bash
-npm run test:live    # Pulls real prices from Alpha Vantage
+node dist/index.js --live        # Full data: portfolio + macro + sector
 ```
 
-**Schedule:** 8:00 AM EST daily via OpenClaw cron (✅ verified 2026-05-03 — brief delivered to Telegram)
+**Portfolio only (skip macro/sector):**
+```bash
+node dist/index.js --live --no-sector
+```
+
+**Schedule:** 8:00 AM EST daily via OpenClaw cron with `delivery.mode: "announce"` → Telegram
 
 ---
 
@@ -83,35 +104,28 @@ npm run test:live    # Pulls real prices from Alpha Vantage
 
 When any position drops >8% in a day:
 
-1. **Detection:** `src/lib/market.ts:114` — `if (Math.abs(quote.changePercent) > 8)`
+1. **Detection:** `src/lib/market.ts` — `status = "black-swan"` when `|changePercent| > 8`
 2. **Status:** Position marked as `black-swan` instead of `drifted`
 3. **Confirmation Required:** Brief includes `⚠️ REQUIRES [CONFIRMED] REPLY`
-4. **Execution:** Only after Mathew replies `[CONFIRMED]` to WhatsApp message
+4. **Execution:** Only after Mathew replies `[CONFIRMED]`
 
 ---
 
-## Running Without Alpha Vantage Key / Telegram Setup
+## Cron Job Architecture
 
-If no Alpha Vantage key, the system gracefully falls back to mock data:
-- Logs: `[MARKET] No API key — using mock data`
-- Brief will note: `Using mock market data (update .env for live)`
+The daily brief runs as an `agentTurn` with `delivery.mode: "announce"` so output reaches Telegram:
 
----
+```json
+{
+  "name": "Capital Pilot Daily",
+  "schedule": { "kind": "cron", "expr": "0 8 * * *", "tz": "America/New_York" },
+  "payload": { "kind": "agentTurn", "message": "Run MarketBot: node dist/index.js --live" },
+  "delivery": { "mode": "announce", "channel": "telegram", "to": "5607383477" },
+  "sessionTarget": "isolated"
+}
+```
 
-## Troubleshooting
-
-**"CSV not found" errors:**
-- Verify `data/discover-transactions.csv` exists
-- Check `DISCOVER_CSV_PATH` in `.env`
-
-**"No quote data" errors:**
-- Alpha Vantage free tier has 25 req/day limit
-- If limit hit, system uses mock data
-- Wait 1 minute for rate limit reset
-
-**Budget showing 0 spent:**
-- CSV might have different column format
-- Check `src/lib/budget.ts:parseDiscoverCSV()` column mapping
+**Why `systemEvent` is wrong:** A `systemEvent` runs a shell command — stdout goes to the execution log, not Telegram. Only `agentTurn` with `announce` delivers the formatted brief.
 
 ---
 
@@ -119,22 +133,29 @@ If no Alpha Vantage key, the system gracefully falls back to mock data:
 
 | File | Purpose |
 |------|---------|
-| `src/index.ts` | Main orchestrator — start here |
+| `src/index.ts` | Main orchestrator — generateDailyBrief() |
+| `src/lib/types.ts` | All interfaces + ticker constants (PORTFOLIO_TICKERS, MACRO_TICKERS, SECTOR_TICKERS) |
+| `src/lib/market.ts` | Yahoo Finance fetcher — getBatchQuotes(), getMacroQuotes(), getSectorQuotes() |
+| `src/lib/profitMaximizer.ts` | Sector scanner — scanSector() |
 | `src/lib/budget.ts` | CSV parsing, budget pacing |
-| `src/lib/market.ts` | Alpha Vantage, drift calc |
-| `src/lib/fidelity.ts` | Gmail/Fidelity email scanner for trade confirmation context |
-| `src/lib/profitMaximizer.ts` | Sector scanner |
+| `src/lib/fidelity.ts` | Gmail/Fidelity email scanner |
 | `src/lib/brief.ts` | Telegram message formatter |
-| `src/lib/types.ts` | All interfaces |
-| `data/portfolio.json` | Static portfolio positions with costs (share counts must be entered) |
-| `data/portfolio-context.md` | Full portfolio baseline from email extraction |
+| `data/portfolio.json` | Static portfolio positions (manually updated) |
 | `data/discover-transactions.csv` | Weekly Discover CSV upload |
+| `OPERATING.md` | This file |
 
 ---
 
-## Testing Workflow
+## Troubleshooting
 
-1. **Unit test:** `npm test` (uses mock data)
-2. **Full mock brief:** `npm run test:daily`
-3. **Live brief:** `npm run test:live` (requires API keys)
-4. **Delivery:** Via OpenClaw cron announce to Telegram (telegram:5607383477) — no manual send flag needed
+**"No new Discover alerts":** Normal when no new Discover charges that week. Checks 25K+ messages on first run.
+
+**"0 alert(s) Fidelity":** Normal — Fidelity emails are scanned for balance updates and trade confirmations.
+
+**Profit Maximizer shows "No high-probability setups":** Normal when no sector stocks meet RSI 30-45, breakout, or MA50 reclaim criteria. Not an error.
+
+**Sector fetch returns fewer than 20 tickers:** Some tickers may fail Yahoo Finance and fall back to last-known prices. Check `data/last-known-prices.json` for persisted prices.
+
+---
+
+_Last updated: 2026-05-05 — Expanded to all 10 portfolio tickers, macro context (SPY/QQQ/DXY/TLT/GLD), sector sweep (20 semi/tech stocks), Yahoo Finance (not Alpha Vantage)._
