@@ -52,6 +52,7 @@ export interface MarketData {
   ma50: number;
   volume: number;
   volumeAvg: number;
+  fiftyTwoWeekHigh?: number;
   status: "bull" | "bear" | "neutral";
   signals: string[];
 }
@@ -195,6 +196,8 @@ export const MACRO_TICKERS = ["SPY", "QQQ", "DXY", "TLT", "GLD"] as const;
 export const SECTOR_TICKERS = [
   "AMD", "TSM", "ASML", "INTC", "QCOM", "AMAT", "LRCX", "MU", "SOXX", "SMH",
   "AVGO", "MRVL", "PANW", "MPWR", "CDNS", "SNPS", "ON", "LSCC", "ENTG", "SWKS",
+  // Defensive/Cyclical sector rotation candidates
+  "XLE", "XLI", "XLB", "VHT", "VBR", "AVUV",
 ] as const;
 
 export const TICKERS = [...PORTFOLIO_TICKERS] as string[];

@@ -82,6 +82,7 @@ import { scanSector, getMockSectorQuotes } from "./lib/profitMaximizer";
 import { applyInvestorFilters, formatPersonaOutput } from "./lib/investor_filter";
 import { runResearchPipeline, discoverOpportunities, formatTickerResearch, formatOpportunities } from "./lib/research_pipeline";
 import { batchFetchNewsSentiment } from "./lib/news_sentiment";
+import { scanMomentumBreakouts, formatMomentumAlerts } from "./lib/momentum_scanner";
 
 const GMAIL_USER = process.env.GMAIL_USER || "";
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD || "";
@@ -300,11 +301,13 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
     console.log(`  ${r.ticker}: composite=${r.compositeScore.toFixed(1)} verdict=${r.verdict}`);
   }
 
-  // Step 5e: New opportunity discovery — mega-cap/semi tickers NOT in portfolio
+  // Step 5e: New opportunity discovery — expanded universe incl. defensives/cyclicals/small-cap
   console.log("\n[STEP 5e] Scanning new opportunities outside portfolio...");
   const candidatePool = [
     "META", "AMZN", "GOOGL", "MSFT",
     "TSM", "AMD", "AVGO", "MRVL", "AMAT", "LRCX", "KLAC", "SNPS", "CDNS", "PANW",
+    "XLE", "XLI", "XLB", "VHT", "VBR", "AVUV", // defensives + small-cap value
+    "MU", // memory cycle (Mathew specifically mentioned)
   ];
   const newOpportunities = await discoverOpportunities(
     candidatePool,
@@ -317,8 +320,6 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
   for (const opp of newOpportunities.slice(0, 3)) {
     console.log(`  ${opp.ticker}: ${opp.category} score=${opp.score.toFixed(1)} — ${opp.thesis.slice(0, 80)}...`);
   }
-
-  const openPositions = updateOpenPositions([], quotes); // starts empty, fills as positions are opened
 
   const { loadSwingState, checkSwingPositions, checkCoreAccumulation, isCriticalOpportunity, formatCriticalAlert } = await import("./lib/swing_manager");
   const swingState = loadSwingState();
@@ -381,8 +382,16 @@ ${researchSummary}`;
   // Format new opportunities
   const oppText = formatOpportunities(newOpportunities);
 
+  // Step 5f: Momentum Breakout Scanner — 52wk highs + sector rotation (separate track)
+  const momentumSetups = await scanMomentumBreakouts();
+  console.log(`[MOMENTUM] ${momentumSetups.length} momentum setup(s) found`);
+  for (const m of momentumSetups.slice(0, 3)) {
+    console.log(`  ${m.ticker}: ${m.type} | conf=${m.confidenceScore} | R/R ${m.riskReward.toFixed(1)}:1 | profit $${m.potentialProfitDollar}`);
+  }
+  const momentumText = formatMomentumAlerts(momentumSetups);
+
   const openPosText = formatOpenPositions([]); // swing positions tracked separately
-  const finalMessage = [message, buffettText, grahamText, researchSection, oppText, openPosText]
+  const finalMessage = [message, buffettText, grahamText, researchSection, oppText, momentumText, openPosText]
     .filter(s => s.trim().length > 0)
     .join("\n\n");
 

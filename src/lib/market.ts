@@ -187,6 +187,7 @@ async function fetchWithRetry(ticker: string, attempt = 1): Promise<MarketData |
       ma50,
       volume,
       volumeAvg,
+      fiftyTwoWeekHigh: result.fiftyTwoWeekHigh ?? undefined,
       status,
       signals,
     };
