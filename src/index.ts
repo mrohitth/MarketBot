@@ -79,12 +79,13 @@ import {
 const GMAIL_USER = process.env.GMAIL_USER || "";
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD || "";
 const CSV_PATH = process.env.DISCOVER_CSV_PATH || path.join(__dirname, "../data/discover-transactions.csv");
-const MONTHLY_NET_INCOME = parseInt(process.env.MONTHLY_NET_INCOME || "8500");
+const MONTHLY_NET_INCOME = parseInt(process.env.MONTHLY_NET_INCOME || "5917");
 
 const BUDGET_LIMITS: BudgetLimits = {
   dining: 600,
-  housing: 2800,
-  discretionary: 500,
+  transportation: 300,
+  subscriptions: 100,
+  discretionary: 400,
   savingsRateTarget: 30,
 };
 

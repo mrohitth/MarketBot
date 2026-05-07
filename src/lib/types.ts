@@ -183,7 +183,8 @@ export interface BalanceVerification {
 
 export interface BudgetLimits {
   dining: number;
-  housing: number;
+  transportation: number;
+  subscriptions: number;
   discretionary: number;
   savingsRateTarget: number;
 }

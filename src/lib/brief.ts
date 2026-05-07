@@ -20,7 +20,7 @@ export function composeBrief(
   positions: Position[],
   recommendations: TradeRecommendation[],
   profitMaximizer: ProfitMaximizerIdea[],
-  cashAvailable: number = 85000 * 0.1
+  cashAvailable: number = 591.74
 ): MorningBrief {
   const now = new Date();
   
@@ -31,8 +31,8 @@ export function composeBrief(
     date: now.toISOString().split("T")[0],
     liquidity: {
       cashAvailable,
-      cashTarget: 85000 * 0.1, // 10% of $850k portfolio
-      status: cashAvailable > 8500 ? "surplus" : "balanced",
+      cashTarget: 5917.42 * 0.1, // 10% of monthly income (2x $2958.71)
+      status: cashAvailable > 5917.42 * 0.1 ? "surplus" : "balanced",
     },
     budgetPacing,
     marketSummary: {
