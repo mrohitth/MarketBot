@@ -183,10 +183,11 @@ export function calculateBudgetPacing(
   }
 
   const totalBudget =
-    limits.dining + limits.transportation + limits.subscriptions + limits.discretionary + limits.rent;
+    limits.dining + limits.transportation + limits.subscriptions + limits.discretionary + limits.fidelity + limits.rent;
   // Rent is fixed — always counted at full limit regardless of transaction list
+  // Fidelity auto-debit ($300/week) — counted as spent each month at the monthly equivalent ($1,300)
   const totalSpent =
-    spent.dining + spent.transportation + spent.subscriptions + spent.discretionary + limits.rent;
+    spent.dining + spent.transportation + spent.subscriptions + spent.discretionary + limits.fidelity + limits.rent;
 
   const totalIncome =
     monthTxns.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0) || monthlyIncome;
@@ -198,7 +199,8 @@ export function calculateBudgetPacing(
     buildCategory("Dining",         limits.dining,         spent.dining),
     buildCategory("Transportation", limits.transportation, spent.transportation),
     buildCategory("Subscriptions",   limits.subscriptions,  spent.subscriptions),
-    buildCategory("Discretionary",  limits.discretionary,  spent.discretionary),
+    buildCategory("Discretionary",   limits.discretionary,  spent.discretionary),
+    buildCategory("Fidelity (SCHG/NVDA/SMH/VTI)", limits.fidelity, limits.fidelity),
   ];
 
   return {

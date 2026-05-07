@@ -84,6 +84,8 @@ const BUDGET_LIMITS: BudgetLimits = {
   transportation: 300,
   subscriptions: 100,
   discretionary: 400,
+  // Weekly auto-debit to Fidelity: SCHG $150 + NVDA $50 + SMH $50 + VTI $50 = $300/week → $1,300/month
+  fidelity: 1300,
   rent: 1000,
   savingsRateTarget: 30,
 };

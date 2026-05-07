@@ -186,7 +186,9 @@ export interface BudgetLimits {
   transportation: number;
   subscriptions: number;
   discretionary: number;
-  savingsRateTarget: number;
+  /** Weekly auto-debit to Fidelity brokerage: SCHG $150 + NVDA $50 + SMH $50 + VTI $50 = $300/week */
+  fidelity: number;
   /** Fixed monthly rent (excluded from pacing category display, included in savings rate calc) */
   rent: number;
+  savingsRateTarget: number;
 }
