@@ -216,9 +216,32 @@ export function gmailToTransaction(gmail: GmailTransaction): Transaction {
 function mapCategoryFromMerchant(merchant: string): string {
   const lower = merchant.toLowerCase();
 
+  // Transportation — cab/ride charges (UBR*, UBER TRIP*, lyft, parking, gas, metro)
+  // Uber Eats / Food Delivery → Dining (see below)
   if (
-    lower.includes("uber") ||
+    lower.includes("ubr") ||
+    lower.includes("uber trip") ||
+    lower.includes("uber ride") ||
+    lower.includes("lyft") ||
+    lower.includes("taxi") ||
+    lower.includes("cab") ||
+    lower.includes("parking") ||
+    lower.includes("metro") ||
+    lower.includes("gas station") ||
+    lower.includes("shell") ||
+    lower.includes("exxon") ||
+    lower.includes("bp ")
+  ) {
+    return "Transportation";
+  }
+  // Dining — food delivery, restaurants, coffee, fast food
+  // Includes: Uber Eats, DoorDash, Toast (TST*), restaurant merchants, coffee shops
+  if (
+    lower.includes("uber eats") ||
     lower.includes("doordash") ||
+    lower.includes("grubhub") ||
+    lower.includes("toast") ||
+    lower.includes("tst") ||  // Toast restaurant POS system
     lower.includes("chipotle") ||
     lower.includes("starbucks") ||
     lower.includes("trader") ||
