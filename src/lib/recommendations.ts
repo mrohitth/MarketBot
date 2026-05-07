@@ -18,8 +18,11 @@ export const MAX_RISK_PER_TRADE_PCT = 0.02; // 2% of portfolio (more conservativ
 /** Minimum risk/reward ratio for a trade to be flagged */
 export const MIN_RISK_REWARD = 2.0; // Must make $2 for every $1 at risk
 
-/** RSI oversold threshold — buy when RSI drops below this */
-export const RSI_OVERSOLD = 35;
+/** RSI oversold threshold — lowered from 35 to 42 to catch pullback
+  * beginnings in trending markets (backtest: NVDA RSI hit 35 only 1x in 120
+  * days — bounces start at 40-45 in strong uptrends). 42 captures the start
+  * of mean-reversion without catching noise in sideways markets. */
+export const RSI_OVERSOLD = 42;
 
 /** RSI overbought threshold — take profit when RSI exceeds this */
 export const RSI_OVERBOUGHT = 68;

@@ -78,9 +78,10 @@ import {
   OpenPosition,
   TradeSetup,
 } from "./lib/recommendations";
-import { batchFetchNewsSentiment } from "./lib/news_sentiment";
 import { scanSector, getMockSectorQuotes } from "./lib/profitMaximizer";
 import { applyInvestorFilters, formatPersonaOutput } from "./lib/investor_filter";
+import { runResearchPipeline, discoverOpportunities, formatTickerResearch, formatOpportunities } from "./lib/research_pipeline";
+import { batchFetchNewsSentiment } from "./lib/news_sentiment";
 
 const GMAIL_USER = process.env.GMAIL_USER || "";
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD || "";
@@ -271,6 +272,52 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
   const investorOutput = applyInvestorFilters(rankedSetups, portfolioValue);
   console.log(`[INVESTOR_FILTER] Buffett: ${investorOutput.buffettLensed.length} passed | Graham: ${investorOutput.grahamLensed.length} passed | Rejected: ${investorOutput.rejected.length}`);
 
+  // Step 5d: Run comprehensive research pipeline on all portfolio tickers
+  console.log("\n[STEP 5d] Running multi-factor research pipeline...");
+  const portfolioResearch: ReturnType<typeof runResearchPipeline>[] = [];
+  const sectorETFChanges = Object.fromEntries([...quotes].map(([t, q]) => [t, q.changePercent]));
+  const macroChanges = Object.fromEntries([...macroQuotes].map(([t, q]) => [t, q.changePercent]));
+  for (const [ticker, quote] of quotes) {
+    const finnhub = newsSentiments.get(ticker) ?? null;
+    const research = runResearchPipeline({
+      ticker,
+      price: quote.price,
+      changePercent: quote.changePercent,
+      rsi: quote.rsi,
+      ma20: quote.ma20,
+      ma50: quote.ma50,
+      volume: quote.volume,
+      volumeAvg: quote.volumeAvg,
+      finnhubSentiment: finnhub,
+      sectorETFChanges,
+      macroChanges,
+      isInPortfolio: true,
+    });
+    portfolioResearch.push(research);
+  }
+  console.log(`[RESEARCH] Analyzed ${portfolioResearch.length} tickers via 4 signal layers`);
+  for (const r of portfolioResearch) {
+    console.log(`  ${r.ticker}: composite=${r.compositeScore.toFixed(1)} verdict=${r.verdict}`);
+  }
+
+  // Step 5e: New opportunity discovery — mega-cap/semi tickers NOT in portfolio
+  console.log("\n[STEP 5e] Scanning new opportunities outside portfolio...");
+  const candidatePool = [
+    "META", "AMZN", "GOOGL", "MSFT",
+    "TSM", "AMD", "AVGO", "MRVL", "AMAT", "LRCX", "KLAC", "SNPS", "CDNS", "PANW",
+  ];
+  const newOpportunities = await discoverOpportunities(
+    candidatePool,
+    sectorETFChanges,
+    macroChanges,
+    newsSentiments,
+    (t: string) => positions.some(p => p.ticker === t)
+  );
+  console.log(`[DISCOVERY] Found ${newOpportunities.length} new opportunities`);
+  for (const opp of newOpportunities.slice(0, 3)) {
+    console.log(`  ${opp.ticker}: ${opp.category} score=${opp.score.toFixed(1)} — ${opp.thesis.slice(0, 80)}...`);
+  }
+
   // Load and update open positions
   const openPositions = updateOpenPositions([], quotes); // starts empty, fills as positions are opened
 
@@ -294,12 +341,26 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
     .filter(s => s.trim().length > 0)
     .join("\n");
 
-  // Append advisor-grade trade setups, investor lens, and open positions
+  // Append research pipeline, opportunities, and open positions to final message
   const setupsText = formatTradeSetups(rankedSetups);
   const buffettText = formatPersonaOutput(investorOutput, "buffett");
   const grahamText = formatPersonaOutput(investorOutput, "graham");
+
+  // Format portfolio research as one-line verdict summaries
+  const researchSummary = portfolioResearch
+    .map(r => {
+      const emoji = r.verdict === "BUY" ? "🟢" : r.verdict === "WATCH" ? "🟡" : "🔴";
+      return `${emoji} ${r.ticker}: ${r.compositeScore >= 0 ? "+" : ""}${r.compositeScore.toFixed(1)} ${r.verdict}`;
+    })
+    .join(" | ");
+  const researchSection = `📊 *PORTFOLIO RESEARCH* (multi-factor)
+${researchSummary}`;
+
+  // Format new opportunities
+  const oppText = formatOpportunities(newOpportunities);
+
   const openPosText = formatOpenPositions(openPositions);
-  const finalMessage = [message, setupsText, buffettText, grahamText, openPosText]
+  const finalMessage = [message, setupsText, buffettText, grahamText, researchSection, oppText, openPosText]
     .filter(s => s.trim().length > 0)
     .join("\n\n");
 
