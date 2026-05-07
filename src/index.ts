@@ -320,7 +320,7 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
 
   const openPositions = updateOpenPositions([], quotes); // starts empty, fills as positions are opened
 
-  const { loadSwingState, checkSwingPositions, checkCoreAccumulation } = await import("./lib/swing_manager");
+  const { loadSwingState, checkSwingPositions, checkCoreAccumulation, isCriticalOpportunity, formatCriticalAlert } = await import("./lib/swing_manager");
   const swingState = loadSwingState();
   console.log(`[SWING] Pool: $${swingState.capital.toFixed(2)} | Active: ${swingState.positions.length} | Realized P&L: $${swingState.realizedPnL.toFixed(2)}`);
 
@@ -394,8 +394,19 @@ ${researchSummary}`;
     console.log("[ALERT] High-priority items — requires confirmation");
   }
 
+  const criticalAlerts = rankedSetups
+    .filter(isCriticalOpportunity)
+    .map(formatCriticalAlert);
+  if (criticalAlerts.length > 0) {
+    console.log(`[CRITICAL] ${criticalAlerts.length} HIGH-CONFIDENCE OPPORTUNITY — ALERTING NOW`);
+    criticalAlerts.forEach(a => console.log(a));
+  }
+
   // Print to stdout — OpenClaw cron announce picks this up
+  const criticalSection = criticalAlerts.length > 0 ? `🚨 *HIGH-CONFIDENCE OPPORTUNITY*
+${criticalAlerts.join("\n\n")}\n` : "";
   console.log("\n" + finalMessage);
+  if (criticalSection) console.log("\n" + criticalSection);
 
   return finalMessage;
 }

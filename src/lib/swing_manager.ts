@@ -8,12 +8,24 @@ import * as path from "path";
 // Philosophy: core portfolio is VTI/VOO/QQQ (untouched). New capital (weekly $300
 // auto-invest + any swing profits) is deployed into swing positions. Proceeds
 // from swing exits go back into core holdings (VTI/VOO/QQQ) or fresh swings.
+//
+// CRITICAL OPPORTUNITY: When confidence >= 90% and R/R >= 3.0, alert immediately.
+// Mathew can deploy savings on these rare high-conviction setups.
 // ═══════════════════════════════════════════════════════════════════════════════
+
+/** Confidence score above which a setup triggers a CRITICAL alert (use savings) */
+export const CRITICAL_CONFIDENCE_THRESHOLD = 90;
+
+/** Minimum R/R for a critical opportunity */
+export const CRITICAL_MIN_RR = 3.0;
+
+/** Minimum profit for a critical opportunity (triggers regardless of pool size) */
+export const CRITICAL_MIN_PROFIT = 2000;
 
 /** Max concurrent swing positions at any time */
 export const MAX_CONCURRENT_SWINGS = 2;
 
-/** Max capital deployed per swing */
+/** Max capital deployed per swing from regular pool */
 export const MAX_SWING_SIZE_DOLLARS = 3000;
 
 /** Hard stop loss on any swing */
@@ -72,6 +84,30 @@ export function addSwingCapital(amount: number): void {
   state.lastUpdated = new Date().toISOString();
   saveSwingState(state);
   console.log(`[SWING] +$${amount.toFixed(2)} added to swing pool. Pool total: $${state.capital.toFixed(2)}`);
+}
+
+/** Check if a setup is a critical opportunity (alert Mathew to use savings) */
+export function isCriticalOpportunity(setup: TradeSetup): boolean {
+  return (
+    setup.confidenceScore >= CRITICAL_CONFIDENCE_THRESHOLD &&
+    setup.riskReward >= CRITICAL_MIN_RR &&
+    setup.potentialProfitDollar >= CRITICAL_MIN_PROFIT
+  );
+}
+
+/** Format critical opportunity alert for Telegram */
+export function formatCriticalAlert(setup: TradeSetup): string {
+  return `🚨🚨🚨 *CRITICAL OPPORTUNITY — DEPLOY SAVINGS*
+
+🔺 BUY ${setup.ticker} — Confidence: ${setup.confidenceScore}/100 | R/R: ${setup.riskReward.toFixed(1)}:1
+Entry: $${setup.entryPrice.toFixed(2)} → Target: $${setup.targetPrice.toFixed(2)} | Stop: $${setup.stopLoss.toFixed(2)}
+Profit potential: $${setup.potentialProfitDollar.toFixed(0)} in ~${setup.holdDaysEstimate} days
+
+Reason: ${setup.catalyst}
+
+Evidence:\n${setup.supportingEvidence.slice(0, 3).map(e => `• ${e}`).join("\n")}
+
+Deploy from savings. Max risk: $${((setup.entryPrice - setup.stopLoss) * 100).toFixed(0)} per 100 shares.`;
 }
 
 /** Check if a setup is a valid swing candidate */
