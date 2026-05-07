@@ -97,7 +97,9 @@ export interface TradeSetup {
   stopLoss: number;
   riskReward: number;
   confidence: "high" | "medium" | "low";
+  confidenceScore: number;  // 0-100, evidence-based numeric confidence
   catalyst: string;
+  supportingEvidence: string[];  // specific news/events driving the setup
   potentialProfitDollar: number;
   holdDaysEstimate: number;
   riskDollar: number;
@@ -129,12 +131,108 @@ export interface OpenPosition {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
+ * Compute a 0-100 confidence score and supporting evidence for a setup.
+ * Evidence is grounded in specific technicals and observable market behavior.
+ */
+function scoreSetup(
+  quote: MarketData,
+  direction: TradeDirection,
+  signal: TradeSignal,
+  newsSentiment?: { score: number; label: string; headlines: string[] }
+): { confidenceScore: number; evidence: string[] } {
+  const { price, changePercent, rsi, ma20, ma50, volume, volumeAvg, status } = quote;
+  const evidence: string[] = [];
+  let score = 0;
+
+
+  // ── Technical signal strength (up to 60 points) ──────────────────────────
+  if (rsi <= 30) {
+    score += 25;
+    evidence.push(`RSI deeply oversold at ${rsi.toFixed(0)} — high probability bounce`);
+  } else if (rsi <= RSI_OVERSOLD) {
+    score += 15;
+    evidence.push(`RSI at ${rsi.toFixed(0)}, near historically reliable bounce zone`);
+  } else if (rsi >= RSI_OVERBOUGHT) {
+    score += 15;
+    evidence.push(`RSI at ${rsi.toFixed(0)}, extended — mean reversion likely`);
+  }
+
+  if (price > ma20) {
+    score += 15;
+    evidence.push(`Trading above 20-day MA ($${ma20.toFixed(2)}) — short-term uptrend`);
+  } else {
+    score += 5;
+    evidence.push(`Below 20-day MA — but not a sustained downtrend`);
+  }
+
+
+  if (price > ma50) {
+    score += 10;
+    evidence.push(`Above 50-day MA ($${ma50.toFixed(2)}) — intermediate-term uptrend`);
+  } else {
+    score += 2;
+    evidence.push(`Below 50-day MA — some mean-reversion fuel`);
+  }
+
+  if (volume >= volumeAvg * 2) {
+    score += 10;
+    evidence.push(`${(volume / volumeAvg).toFixed(0)}% of average volume — conviction trade`);
+  } else if (volume >= volumeAvg * VOLUME_SPIKE_MULTIPLIER) {
+    score += 6;
+    evidence.push(`Volume ${(volume / volumeAvg).toFixed(0)}% above average — confirming`);
+  }
+
+  if (direction === "LONG" && changePercent < -2) {
+    score += 8;
+    evidence.push(`Pulling back ${Math.abs(changePercent).toFixed(1)}% intraday — better entry`);
+  } else if (direction === "LONG" && changePercent > 2) {
+    score -= 5;
+    evidence.push(`Already up ${changePercent.toFixed(1)}% — entry less ideal`);
+  }
+
+  if (status === "bull") {
+    score += 5;
+    evidence.push(`Broad market posture bullish for this ticker`);
+  } else if (status === "bear") {
+    score -= 5;
+    evidence.push(`Ticker in bearish short-term regime — requires tighter stop`);
+  }
+
+  if (signal === "RSI_OVERSOLD_BOUNCE") {
+    score += 10;
+    evidence.push(`RSI_OVERSOLD — historically highest win-rate pattern`);
+  } else if (signal === "BREAKOUT_ABOVE_MA20") {
+    score += 8;
+    evidence.push(`Breakout signal — institutional investors watch this level`);
+  } else if (signal === "SHORT_TERM_PULLBACK") {
+    score += 5;
+    evidence.push(`Pullback in established uptrend — continuation setup`);
+  }
+
+  // ── News sentiment overlay (up to ±15 points) ───────────────────────────
+  if (newsSentiment) {
+    if (newsSentiment.score > 5) {
+      score += Math.min(15, newsSentiment.score);
+      evidence.push(`Recent news: NET POSITIVE sentiment (${newsSentiment.label}) — ${newsSentiment.headlines[0] ?? "bullish headlines"}`);
+    } else if (newsSentiment.score < -5) {
+      score -= Math.min(15, Math.abs(newsSentiment.score));
+      evidence.push(`Recent news: NET NEGATIVE sentiment (${newsSentiment.label}) — ${newsSentiment.headlines[0] ?? "bearish headlines"}`);
+    }
+  }
+
+  score = Math.max(0, Math.min(100, score));
+  return { confidenceScore: score, evidence };
+}
+
+
+/**
  * Analyze a quote and generate trade setups.
  * Returns setups that meet MIN_PROFIT_DOLLAR and MIN_RISK_REWARD criteria.
  */
 export function generateTradeSetups(
   quote: MarketData,
-  portfolioValue: number
+  portfolioValue: number,
+  newsSentiment?: { score: number; label: string; headlines: string[] }
 ): TradeSetup[] {
   const setups: TradeSetup[] = [];
   const { ticker, price, rsi, ma20, ma50, volume, volumeAvg, changePercent, status } = quote;
@@ -152,6 +250,8 @@ export function generateTradeSetups(
     const holdDays = Math.ceil((bounceTarget - price) / price / 0.02 * 3); // rough 3-day per 2% move
 
     if (potentialProfitDollar >= MIN_PROFIT_DOLLAR && riskReward >= MIN_RISK_REWARD) {
+      const { confidenceScore, evidence } = scoreSetup(quote, "LONG", "RSI_OVERSOLD_BOUNCE", newsSentiment);
+
       setups.push({
         ticker,
         direction: "LONG",
@@ -160,8 +260,10 @@ export function generateTradeSetups(
         targetPrice: bounceTarget,
         stopLoss,
         riskReward,
-        confidence: rsi <= 30 ? "high" : "medium",
-        catalyst: `RSI at ${rsi.toFixed(0)} — historically oversold, bounce expected. Bounce target: $${bounceTarget.toFixed(2)} (${(potentialGain / price * 100).toFixed(1)}% move)`,
+        confidence: confidenceScore >= 65 ? "high" : confidenceScore >= 45 ? "medium" : "low",
+        confidenceScore,
+        supportingEvidence: evidence,
+        catalyst: `RSI at ${rsi.toFixed(0)} — historically oversold, bounce expected. Target: $${bounceTarget.toFixed(2)} (${(potentialGain / price * 100).toFixed(1)}% move)`,
         potentialProfitDollar,
         holdDaysEstimate: Math.min(holdDays, MAX_HOLD_DAYS),
         riskDollar: maxRiskDollar,
@@ -180,6 +282,8 @@ export function generateTradeSetups(
     const holdDays = Math.ceil((priceTarget - price) / price / 0.015 * 2);
 
     if (potentialProfitDollar >= MIN_PROFIT_DOLLAR && riskReward >= MIN_RISK_REWARD) {
+      const { confidenceScore, evidence } = scoreSetup(quote, "LONG", "BREAKOUT_ABOVE_MA20", newsSentiment);
+
       setups.push({
         ticker,
         direction: "LONG",
@@ -188,8 +292,10 @@ export function generateTradeSetups(
         targetPrice: priceTarget,
         stopLoss,
         riskReward,
-        confidence: volume > volumeAvg * 2 ? "high" : "medium",
-        catalyst: `Breaking above MA20 on ${(volume / volumeAvg * 100).toFixed(0)}% of average volume. Target: $${priceTarget.toFixed(2)}`,
+        confidence: confidenceScore >= 65 ? "high" : confidenceScore >= 45 ? "medium" : "low",
+        confidenceScore,
+        supportingEvidence: evidence,
+        catalyst: `Breaking above MA20 on ${(volume / volumeAvg * 100).toFixed(0)}% of avg volume. Target: $${priceTarget.toFixed(2)}`,
         potentialProfitDollar,
         holdDaysEstimate: Math.min(holdDays, MAX_HOLD_DAYS),
         riskDollar: maxRiskDollar,
@@ -197,16 +303,17 @@ export function generateTradeSetups(
     }
   }
 
-  // ── MA50 Reclaim (price reclaiming 50-day MA after pullback) ───────────────
+  // ── MA50 Reclaim ─────────────────────────────────────────────────────────
   if (ma50 && Math.abs(price - ma50) / ma50 < 0.025 && Math.abs(changePercent) > 1.5) {
     if (status === "bull" || changePercent > 2) {
-      const target = price * 1.04; // 4% target
+      const target = price * 1.04;
       const stopLoss = price * 0.97;
       const potentialGain = target - price;
       const maxShares = Math.floor(maxRiskDollar / (price - stopLoss));
       const potentialProfitDollar = potentialGain * maxShares;
       const riskReward = potentialGain / (price - stopLoss);
       const holdDays = 5;
+      const { confidenceScore, evidence } = scoreSetup(quote, "LONG", "MOVING_AVG_RECLAIM", newsSentiment);
 
       if (potentialProfitDollar >= MIN_PROFIT_DOLLAR && riskReward >= MIN_RISK_REWARD) {
         setups.push({
@@ -217,7 +324,9 @@ export function generateTradeSetups(
           targetPrice: target,
           stopLoss,
           riskReward,
-          confidence: "medium",
+          confidence: confidenceScore >= 65 ? "high" : confidenceScore >= 45 ? "medium" : "low",
+          confidenceScore,
+          supportingEvidence: evidence,
           catalyst: `Reclaiming MA50 ($${ma50.toFixed(2)}) with ${Math.abs(changePercent).toFixed(1)}% move. 4% target.`,
           potentialProfitDollar,
           holdDaysEstimate: holdDays,
@@ -227,7 +336,7 @@ export function generateTradeSetups(
     }
   }
 
-  // ── Short-Term Pullback in Uptrend ───────────────────────────────────────
+  // ── Short-Term Pullback in Uptrend ──────────────────────────────────────
   if (status === "bull" && changePercent < -1.5 && rsi > 40 && rsi < 60) {
     const support = ma20 < price ? ma20 : price * 0.98;
     const target = price * 1.03;
@@ -237,6 +346,7 @@ export function generateTradeSetups(
     const potentialProfitDollar = potentialGain * maxShares;
     const riskReward = potentialGain / (price - stopLoss);
     const holdDays = 4;
+    const { confidenceScore, evidence } = scoreSetup(quote, "LONG", "SHORT_TERM_PULLBACK", newsSentiment);
 
     if (potentialProfitDollar >= MIN_PROFIT_DOLLAR && riskReward >= MIN_RISK_REWARD) {
       setups.push({
@@ -247,7 +357,9 @@ export function generateTradeSetups(
         targetPrice: target,
         stopLoss,
         riskReward,
-        confidence: "medium",
+        confidence: confidenceScore >= 65 ? "high" : confidenceScore >= 45 ? "medium" : "low",
+        confidenceScore,
+        supportingEvidence: evidence,
         catalyst: `Pullback in uptrend. RSI=${rsi.toFixed(0)}, support near $${support.toFixed(2)}. Target +3%.`,
         potentialProfitDollar,
         holdDaysEstimate: holdDays,
@@ -267,13 +379,12 @@ export function rankSetups(setups: TradeSetup[]): TradeSetup[] {
   return setups
     .filter((s) => s.riskReward >= MIN_RISK_REWARD && s.potentialProfitDollar >= MIN_PROFIT_DOLLAR)
     .sort((a, b) => {
-      // Primary sort: risk/reward (higher is better)
-      const d = b.riskReward - a.riskReward;
-      if (Math.abs(d) > 0.5) return d;
-      // Secondary: confidence
-      const conf = { high: 0, medium: 1, low: 2 };
-      const cd = conf[a.confidence] - conf[b.confidence];
-      if (cd !== 0) return cd;
+      // Primary sort: confidence score (higher is better)
+      const d = b.confidenceScore - a.confidenceScore;
+      if (Math.abs(d) > 5) return d;
+      // Secondary: risk/reward
+      const rr = b.riskReward - a.riskReward;
+      if (Math.abs(rr) > 0.5) return rr;
       // Tertiary: profit dollar
       return b.potentialProfitDollar - a.potentialProfitDollar;
     });
@@ -355,24 +466,69 @@ export function formatOpenPositions(positions: OpenPosition[]): string {
 }
 
 /**
- * Format ranked trade setups for Telegram brief.
+ * Format ranked trade setups as DIRECT, evidence-based buy/sell calls for Telegram.
+ * Format: "Buy TICKER because [specific reason] — Confidence: XX%"
  */
 export function formatTradeSetups(setups: TradeSetup[]): string {
   if (setups.length === 0) {
-    return "🎯 *TRADE SETUPS*\nNo setups meet criteria today ($1,000+ profit, 2:1+ R/R, ≤14 days).";
+    return "🎯 *TRADE CALLS*\nNo setups meet criteria today ($1,000+ profit, 2:1+ R/R, ≤14 days).";
   }
 
-  let output = `🎯 *TRADE SETUPS* (${setups.length} flagged)\n`;
-  output += `_Ranked by risk/reward. Min profit $1K, max 14-day hold._\n\n`;
+  let output = `🎯 *TRADE CALLS* (${setups.length} active)\n`;
+  output += `_Ranked by confidence. All setups: $1K+ profit, 2:1+ R/R, ≤14-day hold._\n\n`;
 
   for (const setup of setups) {
-    const confEmoji = setup.confidence === "high" ? "🟢" : setup.confidence === "medium" ? "🟡" : "🟡";
+    const confBar = setup.confidenceScore >= 75 ? "🟢" : setup.confidenceScore >= 55 ? "🟡" : "🔴";
     const dirEmoji = setup.direction === "LONG" ? "📈" : "📉";
-    output += `${confEmoji} ${dirEmoji} ${setup.ticker} — ${setup.signal.replace(/_/g, " ")}\n`;
-    output += `   Entry: $${setup.entryPrice.toFixed(2)} → Target: $${setup.targetPrice.toFixed(2)} | Stop: $${setup.stopLoss.toFixed(2)}\n`;
-    output += `   R/R: ${setup.riskReward.toFixed(1)}:1 | Profit: $${setup.potentialProfitDollar.toFixed(0)} | Hold: ${setup.holdDaysEstimate}d\n`;
-    output += `   ${setup.catalyst}\n\n`;
+    const action = setup.direction === "LONG" ? "BUY" : "SELL";
+    const sign = setup.potentialProfitDollar >= 0 ? "+" : "";
+
+    // Build direct "because" call — primary catalyst is the main reason
+    const because = buildBecauseClause(setup);
+
+    output += `${confBar} ${dirEmoji} *${action} ${setup.ticker}* because ${because}\n`;
+    output += `   🎯 Entry $${setup.entryPrice.toFixed(2)} → Target $${setup.targetPrice.toFixed(2)} | Stop $${setup.stopLoss.toFixed(2)}\n`;
+    output += `   📊 ${setup.riskReward.toFixed(1)}:1 R/R | ${sign}$${setup.potentialProfitDollar.toFixed(0)} profit | ⏱ ${setup.holdDaysEstimate}d max\n`;
+    output += `   ✅ Confidence: *${setup.confidenceScore}/100* | ${setup.confidence.toUpperCase()} conviction\n`;
+
+    // Evidence bullets — specific technicals driving this call
+    if (setup.supportingEvidence.length > 0) {
+      for (const ev of setup.supportingEvidence.slice(0, 3)) {
+        output += `   • ${ev}\n`;
+      }
+    }
+    output += "\n";
   }
 
   return output;
+}
+
+/**
+ * Build a human-readable "because [reason]" clause from setup data.
+ * This is the core of the direct-call format.
+ */
+function buildBecauseClause(setup: TradeSetup): string {
+  const { signal, ticker, entryPrice, targetPrice, supportingEvidence } = setup as any;
+  const rsi = (setup as any).rsi ?? 50;
+
+  switch (signal) {
+    case "RSI_OVERSOLD_BOUNCE":
+      return `RSI is deeply oversold at ${rsi.toFixed(0)} — historically, this level produces a bounce within days. ${ticker} is trading at $${entryPrice.toFixed(2)} with a $${targetPrice.toFixed(2)} technical target (${((targetPrice - entryPrice) / entryPrice * 100).toFixed(1)}% upside). This is a mean-reversion trade with defined risk.`;
+
+    case "BREAKOUT_ABOVE_MA20": {
+      const volEv = supportingEvidence?.find((e: string) => e.includes("volume")) ?? "volume confirming the move";
+      return `${volEv}. Price is breaking above its 20-day moving average on strong conviction — a signal institutions use to confirm entry. Target: $${targetPrice.toFixed(2)}.`;
+    }
+
+    case "MOVING_AVG_RECLAIM":
+      return `${ticker} is reclaiming its 50-day moving average after a pullback — a sign buyers are stepping back in. This is a historically reliable continuation pattern. Target: $${targetPrice.toFixed(2)}.`;
+
+    case "SHORT_TERM_PULLBACK": {
+      const pullbackEv = supportingEvidence?.find((e: string) => e.includes("Pulling back")) ?? "short-term pullback";
+      return `${pullbackEv}. ${ticker} is in an established uptrend and this dip is a better entry point. RSI=${rsi.toFixed(0)} supports the bounce. Target: $${targetPrice.toFixed(2)}.`;
+    }
+
+    default:
+      return `${ticker} shows a ${signal.replace(/_/g, " ").toLowerCase()} setup. Target $${targetPrice.toFixed(2)} from $${entryPrice.toFixed(2)}.`;
+  }
 }

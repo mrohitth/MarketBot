@@ -78,6 +78,7 @@ import {
   OpenPosition,
   TradeSetup,
 } from "./lib/recommendations";
+import { batchFetchNewsSentiment } from "./lib/news_sentiment";
 import { scanSector, getMockSectorQuotes } from "./lib/profitMaximizer";
 
 const GMAIL_USER = process.env.GMAIL_USER || "";
@@ -234,10 +235,28 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
     0
   ) || 45648.95; // fallback to real portfolio value from screenshot
 
+  // Pre-fetch news sentiment for all tickers in parallel (30-min cache)
+  const allTickers = [...quotes.keys(), ...sectorQuotes.keys()];
+  let newsSentiments = new Map<string, { score: number; label: string; headlines: string[] }>();
+  if (!config.useMockData) {
+    try {
+      newsSentiments = await batchFetchNewsSentiment(allTickers);
+      console.log(`[NEWS] Fetched sentiment for ${newsSentiments.size} tickers`);
+      for (const [ticker, sentiment] of newsSentiments) {
+        if (sentiment.label !== "neutral") {
+          console.log(`  ${ticker}: ${sentiment.label} (score ${sentiment.score})`);
+        }
+      }
+    } catch (err) {
+      console.warn("[NEWS] Sentiment fetch failed, proceeding without news data:", err);
+    }
+  }
+
   const allQuotes = new Map([...quotes, ...sectorQuotes]);
   const allSetups: TradeSetup[] = [];
   for (const [, quote] of allQuotes) {
-    const setups = generateTradeSetups(quote, portfolioValue);
+    const newsForTicker = newsSentiments.get(quote.ticker);
+    const setups = generateTradeSetups(quote, portfolioValue, newsForTicker);
     allSetups.push(...setups);
   }
   const rankedSetups = rankSetups(allSetups).slice(0, 5);
