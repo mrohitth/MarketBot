@@ -7,16 +7,29 @@ import { MarketData } from "./types";
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /** Minimum absolute profit (in $) before a short-term trade idea is flagged */
-export const MIN_PROFIT_DOLLAR = 1000;
+export const MIN_PROFIT_DOLLAR = 500; // lowered from 1000 to catch smaller tickers like ASTS
+
+/** Per-signal-type R/R floor — mean-reversion trades have lower R/R than momentum breakouts */
+export const SIGNAL_MIN_RR: Partial<Record<TradeSignal, number>> = {
+  RSI_OVERSOLD_BOUNCE: 0.8,    // Bounce: 5% stop, 10% target = 2:1 rr. Allow 0.8 floor.
+  BREAKOUT_ABOVE_MA20: 1.5,    // Breakouts need stronger conviction
+  MOVING_AVG_RECLAIM: 1.5,     // MA recross needs confirmation
+  SHORT_TERM_PULLBACK: 1.2,    // Pullback in uptrend, moderate rr
+  GAP_FILL_LONG: 1.5,
+  EARNINGS_MOMENTUM: 1.5,
+};
+
+/** Default R/R floor for any signal not in SIGNAL_MIN_RR */
+export const DEFAULT_MIN_RISK_REWARD = 2.0;
 
 /** Maximum holding period for opportunistic trades (calendar days) */
 export const MAX_HOLD_DAYS = 14;
 
 /** Maximum risk per trade as % of total portfolio value */
-export const MAX_RISK_PER_TRADE_PCT = 0.02; // 2% of portfolio (more conservative than 10% per-trade)
+export const MAX_RISK_PER_TRADE_PCT = 0.02; // 2% of portfolio
 
-/** Minimum risk/reward ratio for a trade to be flagged */
-export const MIN_RISK_REWARD = 2.0; // Must make $2 for every $1 at risk
+/** Minimum risk/reward ratio for a trade to be flagged (applies to signals without SIGNAL_MIN_RR entry) */
+export const MIN_RISK_REWARD = 2.0;
 
 /** RSI oversold threshold — lowered from 35 to 42 to catch pullback
   * beginnings in trending markets (backtest: NVDA RSI hit 35 only 1x in 120
@@ -245,7 +258,7 @@ export function generateTradeSetups(
 
   // ── RSI Oversold Bounce ───────────────────────────────────────────────────
   if (rsi <= RSI_OVERSOLD && rsi > 20) {
-    const bounceTarget = ma20 > price ? ma20 : price * 1.05;
+    const bounceTarget = ma20 > price ? ma20 : price * 1.10; // 10% target for rr=2.0 with 5% stop
     const potentialGain = bounceTarget - price;
     const maxShares = Math.floor(maxRiskDollar / (price * 0.05)); // 5% stop
     const potentialProfitDollar = potentialGain * maxShares;
@@ -253,7 +266,8 @@ export function generateTradeSetups(
     const riskReward = potentialGain / (price - stopLoss);
     const holdDays = Math.ceil((bounceTarget - price) / price / 0.02 * 3); // rough 3-day per 2% move
 
-    if (potentialProfitDollar >= MIN_PROFIT_DOLLAR && riskReward >= MIN_RISK_REWARD) {
+    const signalRR_RSI = SIGNAL_MIN_RR.RSI_OVERSOLD_BOUNCE ?? DEFAULT_MIN_RISK_REWARD;
+    if (potentialProfitDollar >= MIN_PROFIT_DOLLAR && riskReward >= signalRR_RSI) {
       const { confidenceScore, evidence } = scoreSetup(quote, "LONG", "RSI_OVERSOLD_BOUNCE", newsSentiment);
 
       setups.push({
@@ -286,7 +300,8 @@ export function generateTradeSetups(
     const riskReward = potentialGain / (price - stopLoss);
     const holdDays = Math.ceil((priceTarget - price) / price / 0.015 * 2);
 
-    if (potentialProfitDollar >= MIN_PROFIT_DOLLAR && riskReward >= MIN_RISK_REWARD) {
+    const signalRR_Breakout = SIGNAL_MIN_RR.BREAKOUT_ABOVE_MA20 ?? DEFAULT_MIN_RISK_REWARD;
+    if (potentialProfitDollar >= MIN_PROFIT_DOLLAR && riskReward >= signalRR_Breakout) {
       const { confidenceScore, evidence } = scoreSetup(quote, "LONG", "BREAKOUT_ABOVE_MA20", newsSentiment);
 
       setups.push({
@@ -319,9 +334,10 @@ export function generateTradeSetups(
       const potentialProfitDollar = potentialGain * maxShares;
       const riskReward = potentialGain / (price - stopLoss);
       const holdDays = 5;
+      const signalRR_MA = SIGNAL_MIN_RR.MOVING_AVG_RECLAIM ?? DEFAULT_MIN_RISK_REWARD;
       const { confidenceScore, evidence } = scoreSetup(quote, "LONG", "MOVING_AVG_RECLAIM", newsSentiment);
 
-      if (potentialProfitDollar >= MIN_PROFIT_DOLLAR && riskReward >= MIN_RISK_REWARD) {
+      if (potentialProfitDollar >= MIN_PROFIT_DOLLAR && riskReward >= signalRR_MA) {
         setups.push({
           ticker,
           direction: "LONG",
@@ -355,7 +371,8 @@ export function generateTradeSetups(
     const holdDays = 4;
     const { confidenceScore, evidence } = scoreSetup(quote, "LONG", "SHORT_TERM_PULLBACK", newsSentiment);
 
-    if (potentialProfitDollar >= MIN_PROFIT_DOLLAR && riskReward >= MIN_RISK_REWARD) {
+    const signalRR_Pull2 = SIGNAL_MIN_RR.SHORT_TERM_PULLBACK ?? DEFAULT_MIN_RISK_REWARD;
+    if (potentialProfitDollar >= MIN_PROFIT_DOLLAR && riskReward >= signalRR_Pull2) {
       setups.push({
         ticker,
         direction: "LONG",
@@ -385,7 +402,7 @@ export function generateTradeSetups(
  */
 export function rankSetups(setups: TradeSetup[]): TradeSetup[] {
   return setups
-    .filter((s) => s.riskReward >= MIN_RISK_REWARD && s.potentialProfitDollar >= MIN_PROFIT_DOLLAR)
+    .filter((s) => { const floor = SIGNAL_MIN_RR[s.signal] ?? DEFAULT_MIN_RISK_REWARD; return s.riskReward >= floor && s.potentialProfitDollar >= MIN_PROFIT_DOLLAR; })
     .sort((a, b) => {
       // Primary sort: confidence score (higher is better)
       const d = b.confidenceScore - a.confidenceScore;

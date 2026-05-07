@@ -92,7 +92,7 @@ async function fetchHistory(
     const quotes = result?.quotes ?? [];
     return quotes
       .map((q: { date?: number; open?: number; high?: number; low?: number; close?: number; volume?: number }) => ({
-        date: new Date((q.date ?? 0) * 1000).toISOString().split("T")[0],
+        date: (() => { const ts = q.date ?? 0; const ms = ts > 1e12 ? ts : ts * 1000; return new Date(ms).toISOString().split("T")[0]; })(),
         open: q.open ?? 0,
         high: q.high ?? 0,
         low: q.low ?? 0,
