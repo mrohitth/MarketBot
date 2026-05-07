@@ -78,6 +78,44 @@ export async function getSectorQuotes(): Promise<Map<string, MarketData>> {
   return fetchQuotesForTickers(SECTOR_TICKERS);
 }
 
+// ── RSI Constants ─────────────────────────────────────────────────────────────
+const RSI_PERIOD = 14;   // Wilder's default — standard for overbought/oversold analysis
+const RSI_OVERSOLD = 35; // More conservative than 30 — reduces false signals
+const RSI_OVERBOUGHT = 68; // More conservative than 70 — takes profit sooner in trends
+
+/**
+ * Compute Wilder's RSI (Relative Strength Index) from an array of closing prices.
+ * Returns a value from 0-100.
+ * - RSI > 70  → overbought (potential mean-reversion sell)
+ * - RSI < 30  → oversold   (potential bounce long)
+ * - RSI 30-50 → weak/bearish regime
+ * - RSI 50-70 → neutral/bullish regime
+ */
+function computeRSI(prices: number[]): number {
+  if (prices.length < RSI_PERIOD + 1) {
+    // Not enough data — return neutral 50
+    return 50;
+  }
+
+  // Use the most recent RSI_PERIOD closes for calculation
+  const period = prices.slice(-(RSI_PERIOD + 1));
+  let avgGain = 0;
+  let avgLoss = 0;
+
+  for (let i = 1; i < period.length; i++) {
+    const change = period[i] - period[i - 1];
+    if (change > 0) avgGain += change;
+    else avgLoss += Math.abs(change);
+  }
+
+  avgGain /= RSI_PERIOD;
+  avgLoss /= RSI_PERIOD;
+
+  if (avgLoss === 0) return 100; // No losses — infinitely strong
+  const rs = avgGain / avgLoss;
+  return Math.round((100 - 100 / (1 + rs)) * 100) / 100;  // round to 2dp
+}
+
 async function fetchWithRetry(ticker: string, attempt = 1): Promise<MarketData | null> {
   try {
     const mod = await import("yahoo-finance2");
@@ -101,9 +139,29 @@ async function fetchWithRetry(ticker: string, attempt = 1): Promise<MarketData |
     const changePercent = result.regularMarketChangePercent ?? 0;
     const volume = result.regularMarketVolume ?? 0;
     const volumeAvg = result.averageDailyVolume10Week ?? volume;
-    const rsi = 50;
     const ma20 = result.fiftyDayAverage ?? price;
     const ma50 = result.twoHundredDayAverage ?? price;
+
+    // ── Fetch real 14-period Wilder's RSI ───────────────────────────────────
+    let rsi = 50;
+    try {
+      const now = new Date();
+      const threeMonthsAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+      const period1 = threeMonthsAgo.toISOString().split("T")[0];
+      const period2 = now.toISOString().split("T")[0];
+      const chartResult = await yahooFinance.chart(ticker, { period1, period2, interval: "1d" });
+      // yahoo-finance2 uses `quotes` array (not `indicators`)
+      const quotes = chartResult?.quotes ?? [];
+      const closes = quotes
+        .map((q: { close?: number | null }) => q.close)
+        .filter((c: number | null): c is number => c !== null && !isNaN(c));
+      if (closes.length >= RSI_PERIOD + 1) {
+        rsi = computeRSI(closes);
+      }
+    } catch (rsiErr) {
+      // Non-fatal — fall back to neutral RSI rather than failing the whole fetch
+      console.warn(`[MARKET] ${ticker}: RSI computation failed (${rsiErr}), using 50`);
+    }
 
     let status: "bull" | "bear" | "neutral" = "neutral";
     if (changePercent > 1) status = "bull";
@@ -115,8 +173,8 @@ async function fetchWithRetry(ticker: string, attempt = 1): Promise<MarketData |
     if (price > ma50) signals.push("above_ma50");
     if (price < ma50) signals.push("below_ma50");
     if (volume > volumeAvg * 1.5) signals.push("volume_spike");
-    if (rsi < 30) signals.push("rsi_oversold");
-    else if (rsi > 70) signals.push("rsi_overbought");
+    if (rsi <= RSI_OVERSOLD) signals.push("rsi_oversold");
+    else if (rsi >= RSI_OVERBOUGHT) signals.push("rsi_overbought");
 
     return {
       ticker,

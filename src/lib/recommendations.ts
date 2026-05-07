@@ -103,6 +103,7 @@ export interface TradeSetup {
   potentialProfitDollar: number;
   holdDaysEstimate: number;
   riskDollar: number;
+  rsi: number;  // live RSI at time of setup generation (for human-readable output)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -267,6 +268,7 @@ export function generateTradeSetups(
         potentialProfitDollar,
         holdDaysEstimate: Math.min(holdDays, MAX_HOLD_DAYS),
         riskDollar: maxRiskDollar,
+        rsi,
       });
     }
   }
@@ -299,6 +301,7 @@ export function generateTradeSetups(
         potentialProfitDollar,
         holdDaysEstimate: Math.min(holdDays, MAX_HOLD_DAYS),
         riskDollar: maxRiskDollar,
+        rsi,
       });
     }
   }
@@ -331,6 +334,7 @@ export function generateTradeSetups(
           potentialProfitDollar,
           holdDaysEstimate: holdDays,
           riskDollar: maxRiskDollar,
+        rsi,
         });
       }
     }
@@ -364,6 +368,7 @@ export function generateTradeSetups(
         potentialProfitDollar,
         holdDaysEstimate: holdDays,
         riskDollar: maxRiskDollar,
+        rsi,
       });
     }
   }
