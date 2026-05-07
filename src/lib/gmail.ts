@@ -296,13 +296,19 @@ export function deduplicateTransactions(
     }
   }
 
-  // Pending (pre-auth) Gmail transactions are excluded — they may be adjusted or cancelled
+  // Pending Uber pre-auth charges (UBR*, UBER TRIP* PENDING): these are real charges.
+  // When the ride completes, Discover sends a CONFIRMED email that replaces the pending alert.
+  // So if a pending Uber transaction is still in the inbox with no confirmed version,
+  // it means the pre-auth IS the actual charge — count it.
+  // (If a confirmed version arrives later, it will deduplicate against this entry.)
   const pendingTxns = gmailTransactions.filter((g) => g.pending);
   const confirmedTxns = gmailTransactions.filter((g) => !g.pending);
   if (pendingTxns.length > 0) {
-    console.log(`[DEDUP] Skipping ${pendingTxns.length} pending pre-auth: ${pendingTxns.map((p) => p.merchant).join(", ")}`);
+    console.log(`[DEDUP] ${pendingTxns.length} pending Uber pre-auth(s) included as real charges`);
   }
-  for (const gmail of confirmedTxns) {
+  const allNonDuplicate = [...pendingTxns, ...confirmedTxns];
+
+  for (const gmail of allNonDuplicate) {
     const key = `${gmail.date}-${gmail.merchant}-${Math.abs(gmail.amount)}`;
     if (!seen.has(key)) {
       seen.add(key);
