@@ -8,10 +8,15 @@ const GMAIL_IMAP_PORT = 993;
  * Gmail Transaction Parser
  *
  * Scans Gmail inbox for Discover transaction alerts.
- * Format expected:
- * - From: service@email.discover.com
- * - Subject: "Transaction Alert"
- * - Body contains: merchant name, amount, date
+ *
+ * Actual email format (from discover@services.discover.com):
+ *   Subject: "Transaction Alert"
+ *   Body (key fields):
+ *     Merchant: YALLA PITA
+ *     Date: May 06, 2026
+ *     Amount: $14.29
+ *
+ * Supports both field-label format (actual) and the old sentence format (legacy).
  */
 export interface GmailTransaction {
   id: string;
@@ -23,31 +28,63 @@ export interface GmailTransaction {
 }
 
 /**
- * Parse Gmail transaction alert email body
- * Example format:
- * "Your Discover card was used for $45.00 at UBER EATS PIZZA on 05/03/2026."
+ * Parse Gmail transaction alert email body.
+ * Supports two formats:
+ *
+ * Format A — Field-label (actual Discover email):
+ *   Merchant: YALLA PITA
+ *   Date: May 06, 2026
+ *   Amount: $14.29
+ *
+ * Format B — Legacy sentence (fallback):
+ *   "Your Discover card was used for $45.00 at UBER EATS PIZZA on 05/03/2026."
  */
 function parseTransactionEmail(body: string): GmailTransaction | null {
-  // Extract amount
-  const amountMatch = body.match(/\$\s*([\d,]+(?:\.\d{2})?)/);
-  if (!amountMatch) return null;
-  const amount = parseFloat(amountMatch[1].replace(",", ""));
+  let merchant: string | undefined;
+  let dateStr: string | undefined;
+  let amount: number | undefined;
 
-  // Extract merchant (usually after "at" or "for")
-  const merchantMatch = body.match(/(?:at|for)\s+([A-Z][A-Za-z\s]+?)(?:\s+on|\s+\d)/i);
-  const merchant = merchantMatch ? merchantMatch[1].trim() : "Unknown";
+  // ── Format A: Field-label format ──────────────────────────────────────────
+  const merchantMatch = body.match(/^Merchant:\s*(.+)$/m);
+  const dateMatch = body.match(/^Date:\s*(.+)$/m);
+  const amountMatch = body.match(/^Amount:\s*\$([\d,]+(?:\.\d{2})?)/m);
 
-  // Extract date from body
-  const dateMatch = body.match(/(\d{2}\/\d{2}\/\d{4})/);
-  const date = dateMatch
-    ? dateMatch[1].replace(/(\d{2})\/(\d{2})\/(\d{4})/, "$3-$1-$2")
-    : new Date().toISOString().split("T")[0];
+  if (merchantMatch) merchant = merchantMatch[1].trim().toUpperCase();
+  if (amountMatch) amount = parseFloat(amountMatch[1].replace(",", ""));
+
+  if (dateMatch) {
+    const raw = dateMatch[1].trim(); // e.g. "May 06, 2026"
+    const parsed = new Date(raw);
+    if (!isNaN(parsed.getTime())) {
+      dateStr = parsed.toISOString().split("T")[0]; // "2026-05-06"
+    }
+  }
+
+  // ── Format B: Legacy sentence format (fallback) ─────────────────────────
+  if (!merchant || !dateStr || amount === undefined) {
+    const bAmountMatch = body.match(/\$\s*([\d,]+(?:\.\d{2})?)/);
+    const bMerchantMatch = body.match(/(?:at|for)\s+([A-Z][A-Za-z\s]+?)(?:\s+on|\s+\")/i);
+    const bDateMatch = body.match(/(\d{2}\/\d{2}\/\d{4})/);
+
+    if (!amount && bAmountMatch) {
+      amount = parseFloat(bAmountMatch[1].replace(",", ""));
+    }
+    if (!merchant && bMerchantMatch) {
+      merchant = bMerchantMatch[1].trim().toUpperCase();
+    }
+    if (!dateStr && bDateMatch) {
+      dateStr = bDateMatch[1].replace(/(\d{2})\/(\d{2})\/(\d{4})/, "$3-$1-$2");
+    }
+  }
+
+  if (!merchant || amount === undefined) return null;
+  if (!dateStr) dateStr = new Date().toISOString().split("T")[0];
 
   const id = `gmail-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
   return {
     id,
-    date,
+    date: dateStr,
     merchant,
     amount: -amount, // Negative for purchases
     rawSubject: "Transaction Alert",
@@ -60,6 +97,9 @@ function parseTransactionEmail(body: string): GmailTransaction | null {
  *
  * Requires: GMAIL_APP_PASSWORD env var
  * Returns: Array of transactions found
+ *
+ * Searches both discover@services.discover.com and service@email.discover.com
+ * to cover any sender address changes Discover may make.
  */
 export async function scanGmailForDiscoverAlerts(
   gmailUser: string,
@@ -97,9 +137,11 @@ export async function scanGmailForDiscoverAlerts(
         console.log(`[GMAIL] Scanning ${box.messages.total} messages for Discover alerts...`);
 
         // Search for last 10 transaction alerts
+        // Matches both sender addresses Discover uses
         imap.search(
           [
-            ["FROM", "service@email.discover.com"],
+            ["FROM", "discover@services.discover.com"],
+            ["OR", ["FROM", "service@email.discover.com"]],
             ["SUBJECT", "Transaction Alert"],
             ["UNSEEN"],
           ],
@@ -179,7 +221,8 @@ export function gmailToTransaction(gmail: GmailTransaction): Transaction {
 }
 
 /**
- * Map merchant name to Discover category
+ * Map merchant name to Discover/budget category.
+ * Expanded to cover more merchant patterns for better categorization.
  */
 function mapCategoryFromMerchant(merchant: string): string {
   const lower = merchant.toLowerCase();
@@ -192,15 +235,50 @@ function mapCategoryFromMerchant(merchant: string): string {
     lower.includes("trader") ||
     lower.includes("restaurant") ||
     lower.includes("pizza") ||
-    lower.includes("food")
+    lower.includes("food") ||
+    lower.includes("pita") ||
+    lower.includes("grubhub") ||
+    lower.includes("mcdonald") ||
+    lower.includes("chick-fil-a") ||
+    lower.includes("wing") ||
+    lower.includes("dunkin") ||
+    lower.includes("coffee")
   ) {
     return "Dining";
   }
-  if (lower.includes("amazon") || lower.includes("target") || lower.includes("shop")) {
+  if (
+    lower.includes("amazon") ||
+    lower.includes("target") ||
+    lower.includes("shop") ||
+    lower.includes("walgreens") ||
+    lower.includes("cvs") ||
+    lower.includes("costco") ||
+    lower.includes("bjs")
+  ) {
     return "Discretionary";
   }
-  if (lower.includes("zelle") || lower.includes("rent")) {
+  if (lower.includes("zelle") || lower.includes("rent") || lower.includes("venmo")) {
     return "Housing";
+  }
+  if (
+    lower.includes("lyft") ||
+    lower.includes("parking") ||
+    lower.includes("metro") ||
+    lower.includes("gas") ||
+    lower.includes("shell") ||
+    lower.includes("exxon") ||
+    lower.includes("bp ")
+  ) {
+    return "Transportation";
+  }
+  if (
+    lower.includes("netflix") ||
+    lower.includes("spotify") ||
+    lower.includes("hulu") ||
+    lower.includes("disney") ||
+    lower.includes("subscription")
+  ) {
+    return "Subscriptions";
   }
 
   return "Other";
@@ -272,19 +350,19 @@ export function getMockGmailTransactions(): GmailTransaction[] {
   return [
     {
       id: "gmail-001",
-      date: "2026-05-03",
-      merchant: "UBER EATS",
-      amount: -45.5,
-      rawSubject: "Transaction Alert - Your Discover Card was used",
-      receivedAt: "2026-05-03T14:30:00Z",
+      date: "2026-05-06",
+      merchant: "YALLA PITA",
+      amount: -14.29,
+      rawSubject: "Transaction Alert",
+      receivedAt: "2026-05-06T21:22:00Z",
     },
     {
       id: "gmail-002",
-      date: "2026-05-02",
-      merchant: "STARBUCKS",
-      amount: -8.75,
-      rawSubject: "Transaction Alert - Your Discover Card was used",
-      receivedAt: "2026-05-02T09:15:00Z",
+      date: "2026-05-03",
+      merchant: "UBER EATS",
+      amount: -45.5,
+      rawSubject: "Transaction Alert",
+      receivedAt: "2026-05-03T14:30:00Z",
     },
   ];
 }
