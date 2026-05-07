@@ -80,6 +80,7 @@ import {
 } from "./lib/recommendations";
 import { batchFetchNewsSentiment } from "./lib/news_sentiment";
 import { scanSector, getMockSectorQuotes } from "./lib/profitMaximizer";
+import { applyInvestorFilters, formatPersonaOutput } from "./lib/investor_filter";
 
 const GMAIL_USER = process.env.GMAIL_USER || "";
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD || "";
@@ -265,6 +266,11 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
     console.log(`  ${s.ticker}: ${s.signal} | $${s.potentialProfitDollar.toFixed(0)} profit | R/R ${s.riskReward.toFixed(1)}:1 | ${s.holdDaysEstimate}d`);
   }
 
+  // Step 5c: Apply investor persona lenses (Buffett + Graham)
+  console.log("\n[STEP 5c] Applying Buffett + Graham investor filters...");
+  const investorOutput = applyInvestorFilters(rankedSetups, portfolioValue);
+  console.log(`[INVESTOR_FILTER] Buffett: ${investorOutput.buffettLensed.length} passed | Graham: ${investorOutput.grahamLensed.length} passed | Rejected: ${investorOutput.rejected.length}`);
+
   // Load and update open positions
   const openPositions = updateOpenPositions([], quotes); // starts empty, fills as positions are opened
 
@@ -288,10 +294,14 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
     .filter(s => s.trim().length > 0)
     .join("\n");
 
-  // Append advisor-grade trade setups and open positions
+  // Append advisor-grade trade setups, investor lens, and open positions
   const setupsText = formatTradeSetups(rankedSetups);
+  const buffettText = formatPersonaOutput(investorOutput, "buffett");
+  const grahamText = formatPersonaOutput(investorOutput, "graham");
   const openPosText = formatOpenPositions(openPositions);
-  const finalMessage = [message, setupsText, openPosText].filter(s => s.trim().length > 0).join("\n\n");
+  const finalMessage = [message, setupsText, buffettText, grahamText, openPosText]
+    .filter(s => s.trim().length > 0)
+    .join("\n\n");
 
   console.log("\n" + "═".repeat(40));
   console.log("[CAPITAL PILOT] Brief assembled");
