@@ -25,6 +25,8 @@ export interface GmailTransaction {
   amount: number;
   rawSubject: string;
   receivedAt: string;
+  /** True if this is a pre-authorization hold that may be adjusted or cancelled before posting */
+  pending?: boolean;
 }
 
 /**
@@ -68,13 +70,13 @@ function parseDiscoverHTML(htmlBody: string): GmailTransaction | null {
       : raw;
   }
 
+  const isPending = merchant ? /uber|pending|ubr/i.test(merchant) : false;
   if (!merchant && !amount) return null;
   if (!merchant) merchant = "UNKNOWN";
   if (amount === undefined) return null;
   if (!dateStr) dateStr = new Date().toISOString().split("T")[0];
 
   const id = `gmail-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
   return {
     id,
     date: dateStr,
@@ -82,6 +84,7 @@ function parseDiscoverHTML(htmlBody: string): GmailTransaction | null {
     amount: -amount,
     rawSubject: "Transaction Alert",
     receivedAt: new Date().toISOString(),
+    pending: isPending,
   };
 }
 
@@ -293,7 +296,13 @@ export function deduplicateTransactions(
     }
   }
 
-  for (const gmail of gmailTransactions) {
+  // Pending (pre-auth) Gmail transactions are excluded — they may be adjusted or cancelled
+  const pendingTxns = gmailTransactions.filter((g) => g.pending);
+  const confirmedTxns = gmailTransactions.filter((g) => !g.pending);
+  if (pendingTxns.length > 0) {
+    console.log(`[DEDUP] Skipping ${pendingTxns.length} pending pre-auth: ${pendingTxns.map((p) => p.merchant).join(", ")}`);
+  }
+  for (const gmail of confirmedTxns) {
     const key = `${gmail.date}-${gmail.merchant}-${Math.abs(gmail.amount)}`;
     if (!seen.has(key)) {
       seen.add(key);
@@ -338,6 +347,33 @@ export function getMockGmailTransactions(): GmailTransaction[] {
     },
     {
       id: "gmail-002",
+      date: "2026-05-05",
+      merchant: "UBR* PENDING.UBER.COM",
+      amount: -7.39,
+      rawSubject: "Transaction Alert",
+      receivedAt: "2026-05-05T10:00:00Z",
+      pending: true, // May be refunded — excluded from budget
+    },
+    {
+      id: "gmail-003",
+      date: "2026-05-05",
+      merchant: "UBER TRIP* PENDING",
+      amount: -6.23,
+      rawSubject: "Transaction Alert",
+      receivedAt: "2026-05-05T09:00:00Z",
+      pending: true,
+    },
+    {
+      id: "gmail-004",
+      date: "2026-05-05",
+      merchant: "UBER TRIP* PENDING",
+      amount: -8.4,
+      rawSubject: "Transaction Alert",
+      receivedAt: "2026-05-05T09:00:00Z",
+      pending: true,
+    },
+    {
+      id: "gmail-005",
       date: "2026-05-03",
       merchant: "TST*MUMBAI CENTRAL",
       amount: -11.0,

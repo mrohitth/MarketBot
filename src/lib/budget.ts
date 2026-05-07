@@ -76,7 +76,7 @@ function mapCategoryFromDescription(raw: string): string {
     return "Dining";
   }
   if (
-    lower.includes("uber") && (lower.includes("trip") || lower.includes("ride")) ||
+    (lower.includes("uber") && (lower.includes("trip") || lower.includes("ride") || lower.includes("pending") || lower.includes("ubr"))) ||
     lower.includes("lyft") ||
     lower.includes("parking") ||
     lower.includes("metro") ||
