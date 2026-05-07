@@ -42,6 +42,8 @@ export interface InvestorFilterOutput {
   summary: string;
 }
 
+export type InvestorOutput = InvestorFilterOutput;
+
 // ── Persona Classification ────────────────────────────────────────────────────
 
 type ConvictionLevel = "core" | "satellite" | "tactical" | "speculative";

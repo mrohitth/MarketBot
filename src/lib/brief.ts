@@ -10,6 +10,8 @@ import {
 import { formatBudgetPacingForBrief } from "./budget";
 import { formatMarketSummary, formatPositionsForBrief } from "./market";
 import { formatProfitMaximizerForBrief } from "./profitMaximizer";
+import { SwingState } from "./swing_manager";
+import { InvestorOutput } from "./investor_filter";
 
 /**
  * Compose the full Morning Brief
@@ -20,6 +22,11 @@ export function composeBrief(
   positions: Position[],
   recommendations: TradeRecommendation[],
   profitMaximizer: ProfitMaximizerIdea[],
+  swingPoolCash: number,
+  topSetups: any[],
+  swingState: SwingState,
+  coreAccumSignals: { ticker: string; action: string; reason: string }[],
+  investorOutput: InvestorOutput,
   cashAvailable: number = 591.74
 ): MorningBrief {
   const now = new Date();
@@ -31,7 +38,7 @@ export function composeBrief(
     date: now.toISOString().split("T")[0],
     liquidity: {
       cashAvailable,
-      cashTarget: 5917.42 * 0.1, // 10% of monthly income (2x $2958.71)
+      cashTarget: 5917.42 * 0.1,
       status: cashAvailable > 5917.42 * 0.1 ? "surplus" : "balanced",
     },
     budgetPacing,
@@ -45,6 +52,13 @@ export function composeBrief(
     portfolioPositions: positions,
     recommendations,
     profitMaximizer,
+    swingPool: {
+      cashAvailable: swingPoolCash,
+      positions: swingState.positions,
+      realizedPnL: swingState.realizedPnL,
+    },
+    coreAccumulation: coreAccumSignals,
+    investorOutput,
     scheduledActions: recommendations
       .filter((r) => r.requiresConfirmation)
       .map((r) => ({
@@ -111,6 +125,81 @@ export function formatBriefAsTelegram(brief: MorningBrief): string {
   // 6. Profit Maximizer
   output += formatProfitMaximizerForBrief(brief.profitMaximizer);
   output += `\n\n`;
+
+  // ═══════════════════════════════════════════
+  // DUAL TRACK: SWING SIGNALS + CORE ACCUMULATION
+  // ═══════════════════════════════════════════
+
+  // SWING SIGNALS — satellite swing trades (not core holdings)
+  const swingPool = (brief as any).swingPool;
+  if (swingPool) {
+    output += `📊 *SWING POOL*
+`;
+    output += `Available: $${swingPool.cashAvailable.toFixed(2)} | Realized P&L: ${swingPool.realizedPnL >= 0 ? "+" : ""}$${swingPool.realizedPnL.toFixed(2)}
+`;
+    output += `Active swings: ${swingPool.positions.length}/2 max\n`;
+    if (swingPool.positions.length > 0) {
+      for (const pos of swingPool.positions) {
+        output += `  📈 ${pos.ticker} | ${pos.signal}
+`;
+        output += `     Entry: $${pos.entryPrice.toFixed(2)} | Target: $${pos.targetPrice.toFixed(2)} | Stop: $${pos.stopLoss.toFixed(2)}
+`;
+      }
+    } else {
+      output += `  (no active swings — deploy when RSI signal fires)\n`;
+    }
+    output += `\n`;
+  }
+
+  // SWING TRADE CALLS — actionable buy/sell for satellite capital
+  const topSetups = (brief as any).topSetups;
+  if (topSetups && topSetups.length > 0) {
+    output += `🎯 *SWING SIGNALS* (satellite capital only — NOT core holdings)\n`;
+    output += `_For swing pool: $${swingPool?.cashAvailable?.toFixed(0) ?? 0} available. Max 2 concurrent swings._\n\n`;
+    for (const setup of topSetups) {
+      const confBar = setup.confidenceScore >= 75 ? "🟢" : setup.confidenceScore >= 55 ? "🟡" : "🔴";
+      output += `${confBar} 📈 BUY ${setup.ticker}
+`;
+      output += `   Entry: $${setup.entryPrice.toFixed(2)} → Target: $${setup.targetPrice.toFixed(2)} | Stop: $${setup.stopLoss.toFixed(2)}
+`;
+      output += `   R/R: ${setup.riskReward.toFixed(1)}:1 | Profit: $${setup.potentialProfitDollar.toFixed(0)} | Hold: ${setup.holdDaysEstimate}d | Confidence: ${setup.confidenceScore}/100\n`;
+      output += `   Because: ${setup.signal.replace(/_/g, " ").toLowerCase()}\n\n`;
+    }
+  }
+
+  // CORE ACCUMULATION — when to buy VOO/VTI/QQQ
+  const coreAccum = (brief as any).coreAccumulation;
+  if (coreAccum && coreAccum.length > 0) {
+    output += `🏦 *CORE ACCUMULATION SIGNALS*\n`;
+    for (const s of coreAccum) {
+      const emoji = s.action === "DEFER" ? "⏸" : "✅";
+      output += `${emoji} *${s.action} ${s.ticker}* — ${s.reason}\n`;
+    }
+    output += `\n`;
+  } else if (coreAccum && coreAccum.length === 0) {
+    output += `🏦 *CORE ACCUMULATION*
+  VOO/VTI/QQQ: No signal — RSI not in ideal accumulation zone (55-65) or overextended (>75). Defer until pullback.\n\n`;
+  }
+
+  // INVESTOR PERSONA CHECKS
+  const invOut = (brief as any).investorOutput;
+  if (invOut) {
+    if (invOut.buffettLensed.length > 0) {
+      output += `🟢 *BUFFETT LENS — passed*
+`;
+      for (const s of invOut.buffettLensed.slice(0, 2)) {
+        output += `  ${s.ticker}: ${s.signal} | $${s.potentialProfitDollar.toFixed(0)} profit | R/R ${s.riskReward.toFixed(1)}:1\n`;
+      }
+    }
+    if (invOut.grahamLensed.length > 0) {
+      output += `🟡 *GRAHAM LENS — passed*
+`;
+      for (const s of invOut.grahamLensed.slice(0, 2)) {
+        output += `  ${s.ticker}: ${s.signal} | $${s.potentialProfitDollar.toFixed(0)} profit\n`;
+      }
+    }
+    output += `\n`;
+  }
 
   // 7. Scheduled Actions (require confirmation)
   if (brief.scheduledActions.length > 0) {

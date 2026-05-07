@@ -102,6 +102,21 @@ export interface MorningBrief {
   portfolioPositions: Position[];
   recommendations: TradeRecommendation[];
   profitMaximizer: ProfitMaximizerIdea[];
+  swingPool?: {
+    cashAvailable: number;
+    positions: any[];
+    realizedPnL: number;
+  };
+  coreAccumulation?: {
+    ticker: string;
+    action: string;
+    reason: string;
+  }[];
+  investorOutput?: {
+    buffettLensed: any[];
+    grahamLensed: any[];
+    rejected: any[];
+  };
   scheduledActions: {
     type: string;
     description: string;

@@ -318,8 +318,26 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
     console.log(`  ${opp.ticker}: ${opp.category} score=${opp.score.toFixed(1)} — ${opp.thesis.slice(0, 80)}...`);
   }
 
-  // Load and update open positions
   const openPositions = updateOpenPositions([], quotes); // starts empty, fills as positions are opened
+
+  const { loadSwingState, checkSwingPositions, checkCoreAccumulation } = await import("./lib/swing_manager");
+  const swingState = loadSwingState();
+  console.log(`[SWING] Pool: $${swingState.capital.toFixed(2)} | Active: ${swingState.positions.length} | Realized P&L: $${swingState.realizedPnL.toFixed(2)}`);
+
+  // Check existing swing positions against live prices
+  const swingCheck = checkSwingPositions(new Map([...quotes].map(([t, q]) => [t, { price: q.price, rsi: q.rsi }])));
+  if (swingCheck.closed.length > 0) {
+    console.log(`[SWING] Closed ${swingCheck.closed.length} position(s):`, swingCheck.closed.map((p: any) => `${p.ticker} ${p.notes}`));
+  }
+  if (swingCheck.atRisk.length > 0) {
+    console.log(`[SWING] At risk:`, swingCheck.atRisk.map((p: any) => `${p.ticker} ${p.notes}`));
+  }
+
+  // Core accumulation signals
+  const coreAccumSignals = checkCoreAccumulation(new Map([...quotes].map(([t, q]) => [t, { price: q.price, rsi: q.rsi, changePercent: q.changePercent }])));
+  if (coreAccumSignals.length > 0) {
+    console.log(`[CORE] ${coreAccumSignals.length} accumulation signal(s):`, coreAccumSignals.map((s: any) => `${s.ticker} ${s.action}`));
+  }
 
   // Step 6: Compose Brief
   console.log("\n[STEP 6] Composing morning brief...");
@@ -329,6 +347,11 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
     positions,
     recommendations,
     profitMaximizer,
+    swingState.capital,
+    rankedSetups.slice(0, 3),
+    swingState,
+    coreAccumSignals,
+    investorOutput,
     MONTHLY_NET_INCOME * 0.1
   );
 
@@ -342,7 +365,6 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
     .join("\n");
 
   // Append research pipeline, opportunities, and open positions to final message
-  const setupsText = formatTradeSetups(rankedSetups);
   const buffettText = formatPersonaOutput(investorOutput, "buffett");
   const grahamText = formatPersonaOutput(investorOutput, "graham");
 
@@ -359,8 +381,8 @@ ${researchSummary}`;
   // Format new opportunities
   const oppText = formatOpportunities(newOpportunities);
 
-  const openPosText = formatOpenPositions(openPositions);
-  const finalMessage = [message, setupsText, buffettText, grahamText, researchSection, oppText, openPosText]
+  const openPosText = formatOpenPositions([]); // swing positions tracked separately
+  const finalMessage = [message, buffettText, grahamText, researchSection, oppText, openPosText]
     .filter(s => s.trim().length > 0)
     .join("\n\n");
 
