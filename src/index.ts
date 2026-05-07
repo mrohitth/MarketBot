@@ -75,6 +75,7 @@ import {
   GmailTransaction,
   gmailToTransaction,
 } from "./lib/gmail";
+import { categorizeFromWeb } from "./lib/categorize_web";
 
 const GMAIL_USER = process.env.GMAIL_USER || "";
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD || "";
@@ -145,6 +146,23 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
     transactions = deduplicateTransactions(csvTransactions, gmailTransactions);
     budgetPacing = calculateBudgetPacing(transactions, BUDGET_LIMITS, MONTHLY_NET_INCOME);
     console.log(`[BUDGET] Combined ${transactions.length} transaction(s)`);
+
+    // ── Categorize "Other" transactions via web search ───────────────────────
+    const otherTxns = transactions.filter((t) => t.category === "Other");
+    if (otherTxns.length > 0) {
+      console.log(`[BUDGET] Resolving ${otherTxns.length} "Other" transaction(s) via web...`);
+      for (const txn of otherTxns) {
+        const merchant = txn.merchant || txn.description;
+        const found = await categorizeFromWeb(merchant, txn.amount);
+        if (found) {
+          txn.category = found;
+          console.log(`[BUDGET] ${merchant} → ${found}`);
+        } else {
+          console.log(`[BUDGET] ${merchant} → Other (no match found)`);
+        }
+      }
+      budgetPacing = calculateBudgetPacing(transactions, BUDGET_LIMITS, MONTHLY_NET_INCOME);
+    }
   }
   console.log(`[BUDGET] Spent: $${budgetPacing.totalSpent.toFixed(0)} / $${budgetPacing.totalBudget.toFixed(0)} | Rate: ${budgetPacing.savingsRate.toFixed(1)}%`);
 

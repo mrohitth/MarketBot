@@ -49,22 +49,36 @@ export function parseDiscoverCSV(csvPath: string): Transaction[] {
 
 /**
  * Map a bank/CSV description string to a standardized category.
+ * Order matters — first match wins.
  */
 function mapCategoryFromDescription(raw: string): string {
   const lower = raw.toLowerCase();
 
-  // ── Dining ─────────────────────────────────────────────────────────────
-  // Includes: restaurants, fast food, coffee shops, delivery, and specific merchants
-  const diningMerchants = [
-    "pizza", "restaurant", "chipotle", "starbucks", "trader",
-    "mcdonald", "chick-fil-a", "wing", "dunkin", "coffee", "eat",
-    "pita", "grubhub", "doordash", "uber eats", "mumbai",
+  // ── Income ──────────────────────────────────────────────────────────────────
+  if (
+    lower.includes("income") ||
+    lower.includes("deposit") ||
+    lower.includes("payroll") ||
+    lower.includes("salary") ||
+    lower.includes("employer")
+  ) {
+    return "Income";
+  }
+
+  // ── Dining ─────────────────────────────────────────────────────────────────
+  // Includes: restaurants, fast food, coffee shops, delivery, TST* restaurant prefix
+  const diningKeywords = [
+    "uber eats", "doordash", "grubhub", "chipotle", "starbucks",
+    "trader", "restaurant", "pizza", "food", "pita",
+    "mcdonald", "chick-fil-a", "wing", "dunkin", "coffee",
+    "eat", "dining",
   ];
   const isDining =
-    diningMerchants.some((kw) => lower.includes(kw)) ||
-    /\btst\*/i.test(raw) ||              // TST* = some restaurant prefix
-    /\b(tst|pizza|hospitality)\b/i.test(raw); // fallback for restaurant-like TST charges
+    diningKeywords.some((kw) => lower.includes(kw)) ||
+    /\btst\*/i.test(raw); // TST* = restaurant prefix in Discover format
   if (isDining) return "Dining";
+
+  // ── Transportation ───────────────────────────────────────────────────────────
   if (
     (lower.includes("uber") && (lower.includes("trip") || lower.includes("ride") || lower.includes("pending") || lower.includes("ubr"))) ||
     lower.includes("lyft") ||
@@ -79,6 +93,8 @@ function mapCategoryFromDescription(raw: string): string {
   ) {
     return "Transportation";
   }
+
+  // ── Subscriptions ───────────────────────────────────────────────────────────
   if (
     lower.includes("netflix") ||
     lower.includes("spotify") ||
@@ -93,6 +109,8 @@ function mapCategoryFromDescription(raw: string): string {
   ) {
     return "Subscriptions";
   }
+
+  // ── Discretionary ───────────────────────────────────────────────────────────
   if (
     lower.includes("amazon") ||
     lower.includes("target") ||
@@ -106,14 +124,12 @@ function mapCategoryFromDescription(raw: string): string {
   ) {
     return "Discretionary";
   }
-  if (
-    lower.includes("income") ||
-    lower.includes("deposit") ||
-    lower.includes("payroll") ||
-    lower.includes("salary") ||
-    lower.includes("employer")
-  ) {
-    return "Income";
+
+  // ── Zelle / Venmo ───────────────────────────────────────────────────────────
+  // These are fixed transfers (e.g. rent to roommate) — tracked as Other,
+  // excluded from savings rate calculation
+  if (lower.includes("zelle") || lower.includes("venmo")) {
+    return "Other";
   }
 
   return "Other";
@@ -133,22 +149,19 @@ function extractMerchant(description: string): string {
  * Calculate budget pacing for the current month.
  *
  * Income: 2x $2958.71 = $5917.42/month (pay twice monthly)
- * Housing is excluded — it's a fixed $1k/month constant Zelle transfer not tracked here.
- *
- * Remaining income after fixed categories goes to savings.
+ * Rent: $1000/month fixed constant — always counted in full each month.
+ * Variable categories: Dining, Transportation, Subscriptions, Discretionary.
  */
 export function calculateBudgetPacing(
   transactions: Transaction[],
   limits: BudgetLimits,
-  monthlyIncome: number = 5917.42 // 2 x $2958.71 — pay twice monthly
+  monthlyIncome: number = 5917.42
 ): BudgetPacingReport {
   const now = new Date();
   const monthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 
-  // Filter to current month transactions
   const monthTxns = transactions.filter((t) => t.date.startsWith(monthStr));
 
-  // Sum spending by variable category (Housing excluded — fixed constant)
   const spent = {
     dining: 0,
     transportation: 0,
@@ -158,33 +171,33 @@ export function calculateBudgetPacing(
   };
 
   for (const txn of monthTxns) {
-    if (txn.amount > 0) continue; // Skip income/credits
+    if (txn.amount > 0) continue;
     const absAmount = Math.abs(txn.amount);
     switch (txn.category) {
-      case "Dining":        spent.dining        += absAmount; break;
+      case "Dining":         spent.dining         += absAmount; break;
       case "Transportation": spent.transportation += absAmount; break;
-      case "Subscriptions": spent.subscriptions  += absAmount; break;
-      case "Discretionary": spent.discretionary  += absAmount; break;
+      case "Subscriptions":  spent.subscriptions  += absAmount; break;
+      case "Discretionary":  spent.discretionary  += absAmount; break;
       default:              spent.other           += absAmount;
     }
   }
 
-  const totalBudget = limits.dining + limits.transportation + limits.subscriptions + limits.discretionary + limits.rent;
-  // Rent is a fixed constant — always full amount for the month
-  const totalSpent = spent.dining + spent.transportation + spent.subscriptions + spent.discretionary + limits.rent;
-  // Note: ZELLE transfers (Other) are fixed constants excluded from tracking
+  const totalBudget =
+    limits.dining + limits.transportation + limits.subscriptions + limits.discretionary + limits.rent;
+  // Rent is fixed — always counted at full limit regardless of transaction list
+  const totalSpent =
+    spent.dining + spent.transportation + spent.subscriptions + spent.discretionary + limits.rent;
 
-  // Savings = income - all variable spending
-  const totalIncome = monthTxns.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0) || monthlyIncome;
+  const totalIncome =
+    monthTxns.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0) || monthlyIncome;
   const netSaved = totalIncome - totalSpent;
   const savingsRate = (netSaved / totalIncome) * 100;
 
-  // Build category statuses
   const categories: BudgetCategory[] = [
     buildCategory("Housing (Rent)", limits.rent, limits.rent),
     buildCategory("Dining",         limits.dining,         spent.dining),
     buildCategory("Transportation", limits.transportation, spent.transportation),
-    buildCategory("Subscriptions",  limits.subscriptions,  spent.subscriptions),
+    buildCategory("Subscriptions",   limits.subscriptions,  spent.subscriptions),
     buildCategory("Discretionary",  limits.discretionary,  spent.discretionary),
   ];
 
@@ -198,7 +211,11 @@ export function calculateBudgetPacing(
   };
 }
 
-function buildCategory(name: string, limit: number, spent: number): BudgetCategory {
+function buildCategory(
+  name: string,
+  limit: number,
+  spent: number
+): BudgetCategory {
   if (limit <= 0) {
     return { name, limit, alertThreshold: 0.8, spent, remaining: 0, percentUsed: 0, status: "ok" };
   }
@@ -239,9 +256,6 @@ export function formatBudgetPacingForBrief(report: BudgetPacingReport): string {
   return output;
 }
 
-/**
- * Generate ASCII progress bar
- */
 function generateProgressBar(percent: number, length: number = 10): string {
   const filled = Math.min(100, percent) / 10;
   const bar = "█".repeat(Math.floor(filled)) + "░".repeat(length - Math.floor(filled));
@@ -269,7 +283,7 @@ export function getBudgetAlerts(report: BudgetPacingReport): string[] {
   return alerts;
 }
 
-// === Mock Data for Testing ===
+// === Mock Data ===
 
 export function getMockTransactions(): Transaction[] {
   return [
@@ -277,12 +291,12 @@ export function getMockTransactions(): Transaction[] {
     { date: "2026-05-01", description: "STARBUCKS COFFEE",      amount: -8.50,   category: "Dining",        merchant: "Starbucks" },
     { date: "2026-05-01", description: "PAYROLL DEPOSIT",       amount: 2958.71, category: "Income",        merchant: "Employer" },
     { date: "2026-05-03", description: "UBER TRIP",             amount: -12.50,  category: "Transportation", merchant: "Uber" },
-    { date: "2026-05-03", description: "AMAZON PRIME",           amount: -35.00,  category: "Discretionary", merchant: "Amazon" },
-    { date: "2026-05-04", description: "CHIPOTLE",               amount: -18.75,  category: "Dining",        merchant: "Chipotle" },
-    { date: "2026-05-05", description: "TARGET SHOPPING",        amount: -125.00, category: "Discretionary", merchant: "Target" },
-    { date: "2026-05-05", description: "SPOTIFY",                amount: -12.99,  category: "Subscriptions", merchant: "Spotify" },
-    { date: "2026-05-05", description: "PAYROLL DEPOSIT",        amount: 2958.71, category: "Income",        merchant: "Employer" },
+    { date: "2026-05-03", description: "AMAZON PRIME",          amount: -35.00,  category: "Discretionary", merchant: "Amazon" },
+    { date: "2026-05-04", description: "CHIPOTLE",              amount: -18.75,  category: "Dining",        merchant: "Chipotle" },
+    { date: "2026-05-05", description: "TARGET SHOPPING",       amount: -125.00, category: "Discretionary", merchant: "Target" },
+    { date: "2026-05-05", description: "SPOTIFY",               amount: -12.99,  category: "Subscriptions", merchant: "Spotify" },
+    { date: "2026-05-05", description: "PAYROLL DEPOSIT",       amount: 2958.71, category: "Income",        merchant: "Employer" },
     { date: "2026-05-07", description: "TRADER JOES GROCERIES",  amount: -95.00,  category: "Dining",        merchant: "Trader Joes" },
-    { date: "2026-05-07", description: "DOORDASH DELIVERY",      amount: -42.00,  category: "Dining",        merchant: "DoorDash" },
+    { date: "2026-05-07", description: "DOORDASH DELIVERY",    amount: -42.00,  category: "Dining",        merchant: "DoorDash" },
   ];
 }
