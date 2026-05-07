@@ -86,6 +86,7 @@ const BUDGET_LIMITS: BudgetLimits = {
   transportation: 300,
   subscriptions: 100,
   discretionary: 400,
+  rent: 1000,
   savingsRateTarget: 30,
 };
 

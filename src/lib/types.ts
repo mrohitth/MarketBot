@@ -187,4 +187,6 @@ export interface BudgetLimits {
   subscriptions: number;
   discretionary: number;
   savingsRateTarget: number;
+  /** Fixed monthly rent (excluded from pacing category display, included in savings rate calc) */
+  rent: number;
 }

@@ -53,28 +53,18 @@ export function parseDiscoverCSV(csvPath: string): Transaction[] {
 function mapCategoryFromDescription(raw: string): string {
   const lower = raw.toLowerCase();
 
-  if (
-    lower.includes("uber") ||
-    lower.includes("lyft") ||
-    lower.includes("doordash") ||
-    lower.includes("chipotle") ||
-    lower.includes("starbucks") ||
-    lower.includes("trader") ||
-    lower.includes("restaurant") ||
-    lower.includes("pizza") ||
-    lower.includes("food") ||
-    lower.includes("pita") ||
-    lower.includes("grubhub") ||
-    lower.includes("mcdonald") ||
-    lower.includes("chick-fil-a") ||
-    lower.includes("wing") ||
-    lower.includes("dunkin") ||
-    lower.includes("coffee") ||
-    lower.includes("dining") ||
-    lower.includes("eat")
-  ) {
-    return "Dining";
-  }
+  // ── Dining ─────────────────────────────────────────────────────────────
+  // Includes: restaurants, fast food, coffee shops, delivery, and specific merchants
+  const diningMerchants = [
+    "pizza", "restaurant", "chipotle", "starbucks", "trader",
+    "mcdonald", "chick-fil-a", "wing", "dunkin", "coffee", "eat",
+    "pita", "grubhub", "doordash", "uber eats", "mumbai",
+  ];
+  const isDining =
+    diningMerchants.some((kw) => lower.includes(kw)) ||
+    /\btst\*/i.test(raw) ||              // TST* = some restaurant prefix
+    /\b(tst|pizza|hospitality)\b/i.test(raw); // fallback for restaurant-like TST charges
+  if (isDining) return "Dining";
   if (
     (lower.includes("uber") && (lower.includes("trip") || lower.includes("ride") || lower.includes("pending") || lower.includes("ubr"))) ||
     lower.includes("lyft") ||
@@ -179,8 +169,9 @@ export function calculateBudgetPacing(
     }
   }
 
-  const totalBudget = limits.dining + limits.transportation + limits.subscriptions + limits.discretionary;
-  const totalSpent = spent.dining + spent.transportation + spent.subscriptions + spent.discretionary;
+  const totalBudget = limits.dining + limits.transportation + limits.subscriptions + limits.discretionary + limits.rent;
+  // Rent is a fixed constant — always full amount for the month
+  const totalSpent = spent.dining + spent.transportation + spent.subscriptions + spent.discretionary + limits.rent;
   // Note: ZELLE transfers (Other) are fixed constants excluded from tracking
 
   // Savings = income - all variable spending
@@ -190,6 +181,7 @@ export function calculateBudgetPacing(
 
   // Build category statuses
   const categories: BudgetCategory[] = [
+    buildCategory("Housing (Rent)", limits.rent, limits.rent),
     buildCategory("Dining",         limits.dining,         spent.dining),
     buildCategory("Transportation", limits.transportation, spent.transportation),
     buildCategory("Subscriptions",  limits.subscriptions,  spent.subscriptions),
@@ -212,7 +204,7 @@ function buildCategory(name: string, limit: number, spent: number): BudgetCatego
   }
   const percentUsed = (spent / limit) * 100;
   let status: "ok" | "warning" | "exceeded" = "ok";
-  if (percentUsed >= 100) status = "exceeded";
+  if (percentUsed > 100) status = "exceeded";
   else if (percentUsed >= 80) status = "warning";
 
   return {
