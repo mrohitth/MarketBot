@@ -1,4 +1,13 @@
-import { MarketData, Position, PortfolioTargets, DriftThresholds, TradeRecommendation, TICKERS, MACRO_TICKERS, SECTOR_TICKERS } from "./types";
+import { MarketData, Position, TradeRecommendation, TICKERS, MACRO_TICKERS, SECTOR_TICKERS } from "./types";
+import {
+  PORTFOLIO_TARGET_ALLOCATION,
+  DRIFT_THRESHOLDS_ADVISORY,
+  BLACK_SWAN_THRESHOLD_PCT,
+  generateTradeSetups,
+  rankSetups,
+  OpenPosition,
+  TradeSetup,
+} from "./recommendations";
 
 const LAST_KNOWN_PRICES_PATH = "./data/last-known-prices.json";
 
@@ -135,9 +144,7 @@ async function fetchWithRetry(ticker: string, attempt = 1): Promise<MarketData |
 
 export function calculatePositions(
   quotes: Map<string, MarketData>,
-  holdings: Map<string, number>,
-  targets: PortfolioTargets,
-  thresholds: DriftThresholds
+  holdings: Map<string, number>
 ): Position[] {
   const positions: Position[] = [];
   let totalValue = 0;
@@ -152,16 +159,13 @@ export function calculatePositions(
     if (!quote) continue;
 
     const marketValue = quote.price * shares;
-    const targetKey = ticker as keyof PortfolioTargets;
-    const targetWeight = targets[targetKey] || 0.05;
+    const targetWeight = PORTFOLIO_TARGET_ALLOCATION[ticker] ?? 0.05;
     const currentWeight = marketValue / totalValue;
     const drift = targetWeight > 0 ? ((currentWeight - targetWeight) / targetWeight) * 100 : 0;
-
-    const thresholdKey = ticker as keyof DriftThresholds;
-    const driftThreshold = thresholds[thresholdKey] || 5;
+    const driftThreshold = DRIFT_THRESHOLDS_ADVISORY[ticker] ?? 5;
 
     let status: "on-target" | "drifted" | "black-swan" = "on-target";
-    if (Math.abs(quote.changePercent) > 8) status = "black-swan";
+    if (Math.abs(quote.changePercent) > BLACK_SWAN_THRESHOLD_PCT) status = "black-swan";
     else if (Math.abs(drift) > driftThreshold) status = "drifted";
 
     positions.push({

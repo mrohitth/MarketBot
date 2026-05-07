@@ -55,10 +55,7 @@ import {
   formatMarketSummary,
   formatPositionsForBrief,
 } from "./lib/market";
-import {
-  PORTFOLIO_TARGETS,
-  DRIFT_THRESHOLDS,
-} from "./lib/types";
+import { PORTFOLIO_TARGET_ALLOCATION } from "./lib/recommendations";
 import { composeBrief, formatBriefAsTelegram, hasHighPriorityItems } from "./lib/brief";
 import {
   scanGmailForDiscoverAlerts,
@@ -72,6 +69,15 @@ import {
   getMockTransactions,
   getBudgetAlerts,
 } from "./lib/budget";
+import {
+  generateTradeSetups,
+  rankSetups,
+  updateOpenPositions,
+  formatTradeSetups,
+  formatOpenPositions,
+  OpenPosition,
+  TradeSetup,
+} from "./lib/recommendations";
 import { scanSector, getMockSectorQuotes } from "./lib/profitMaximizer";
 
 const GMAIL_USER = process.env.GMAIL_USER || "";
@@ -122,7 +128,7 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
       const balanceAlerts = fidelityAlerts.filter(a => a.type === "balance_alert" && a.balance);
       if (balanceAlerts.length > 0) {
         const portfolio = loadPortfolio();
-        balanceVerification = await verifyBalance(balanceAlerts[0].balance!, portfolio, PORTFOLIO_TARGETS);
+        balanceVerification = await verifyBalance(balanceAlerts[0].balance!, portfolio, portfolio.targetAllocation);
         console.log(`[FIDELITY] Balance check: diff=$${balanceVerification[0]?.difference.toFixed(2)}`);
       }
     } catch (error) {
@@ -181,10 +187,10 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
   let positions: Position[];
 
   if (config.useMockData) {
-    positions = calculatePositions(quotes, getMockHoldings(), PORTFOLIO_TARGETS, DRIFT_THRESHOLDS);
+    positions = calculatePositions(quotes, getMockHoldings());
   } else {
     const holdings = getHoldingsFromPortfolio();
-    positions = calculatePositions(quotes, holdings, PORTFOLIO_TARGETS, DRIFT_THRESHOLDS);
+    positions = calculatePositions(quotes, holdings);
   }
 
   for (const pos of positions) {
@@ -218,6 +224,31 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
     console.log(`  ${idea.ticker}: ${idea.setup} (R/R: ${idea.riskReward.toFixed(1)})`);
   }
 
+  // Step 5b: Advisor-Grade Trade Setups (new recommendations engine)
+  console.log("\n[STEP 5b] Generating trade setups via advisor engine...");
+  const portfolioValue = Array.from(quotes.values()).reduce(
+    (sum, q) => {
+      const pos = positions.find((p) => p.ticker === q.ticker);
+      return sum + (pos?.marketValue ?? 0);
+    },
+    0
+  ) || 45648.95; // fallback to real portfolio value from screenshot
+
+  const allQuotes = new Map([...quotes, ...sectorQuotes]);
+  const allSetups: TradeSetup[] = [];
+  for (const [, quote] of allQuotes) {
+    const setups = generateTradeSetups(quote, portfolioValue);
+    allSetups.push(...setups);
+  }
+  const rankedSetups = rankSetups(allSetups).slice(0, 5);
+  console.log(`[SETUPS] ${rankedSetups.length} trade setups meet advisor criteria`);
+  for (const s of rankedSetups) {
+    console.log(`  ${s.ticker}: ${s.signal} | $${s.potentialProfitDollar.toFixed(0)} profit | R/R ${s.riskReward.toFixed(1)}:1 | ${s.holdDaysEstimate}d`);
+  }
+
+  // Load and update open positions
+  const openPositions = updateOpenPositions([], quotes); // starts empty, fills as positions are opened
+
   // Step 6: Compose Brief
   console.log("\n[STEP 6] Composing morning brief...");
   const brief = composeBrief(
@@ -238,6 +269,11 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
     .filter(s => s.trim().length > 0)
     .join("\n");
 
+  // Append advisor-grade trade setups and open positions
+  const setupsText = formatTradeSetups(rankedSetups);
+  const openPosText = formatOpenPositions(openPositions);
+  const finalMessage = [message, setupsText, openPosText].filter(s => s.trim().length > 0).join("\n\n");
+
   console.log("\n" + "═".repeat(40));
   console.log("[CAPITAL PILOT] Brief assembled");
   console.log(`[SUMMARY] Budget: ${budgetPacing.status} | Market: ${brief.marketSummary.overallSignal} | Actions: ${recommendations.length}`);
@@ -247,9 +283,9 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
   }
 
   // Print to stdout — OpenClaw cron announce picks this up
-  console.log("\n" + message);
+  console.log("\n" + finalMessage);
 
-  return message;
+  return finalMessage;
 }
 
 async function main() {

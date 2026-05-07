@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import { MarketData, Position, PortfolioTargets, DriftThresholds } from "./types";
+import { MarketData, Position, PortfolioTargets, DriftThresholds, PortfolioStatic } from "./types";
 import { getBatchQuotes, calculatePositions, generateRebalanceRecommendations, getMockHoldings } from "./market";
 import Imap = require("imap");
 
@@ -8,20 +8,7 @@ const PORTFOLIO_JSON_PATH = "./data/portfolio.json";
 
 // === Types ===
 
-export interface PortfolioEntry {
-  shares: number;
-  note?: string;
-}
-
-export interface PortfolioStatic {
-  lastUpdated: string;
-  note: string;
-  positions: {
-    NVDA: PortfolioEntry;
-    SMH: PortfolioEntry;
-    SCHG: PortfolioEntry;
-  };
-}
+// PortfolioEntry and PortfolioStatic now live in ./types.ts
 
 export interface FidelityAlert {
   type: "transfer" | "trade_confirmation" | "balance_alert";
@@ -55,7 +42,15 @@ export function loadPortfolio(): PortfolioStatic {
     return {
       lastUpdated: new Date().toISOString().split("T")[0],
       note: "Not yet configured",
-      positions: { NVDA: { shares: 0 }, SMH: { shares: 0 }, SCHG: { shares: 0 } },
+      positions: {
+        VTI: { shares: 0 }, NVDA: { shares: 0 }, VOO: { shares: 0 }, QQQ: { shares: 0 },
+        SMH: { shares: 0 }, SCHG: { shares: 0 }, VXUS: { shares: 0 }, SCHD: { shares: 0 },
+        SPYD: { shares: 0 }, ASTS: { shares: 0 }, SPAXX: { shares: 0 },
+      },
+      targetAllocation: {
+        VTI: 0.20, NVDA: 0.19, VOO: 0.17, QQQ: 0.14, SMH: 0.10, SCHG: 0.08,
+        VXUS: 0.05, SCHD: 0.04, SPYD: 0.01, ASTS: 0.01, SPAXX: 0.01,
+      },
     };
   }
   try {
