@@ -1,16 +1,18 @@
 /**
- * Market Opportunity Scanner v4 — runs every 30 min.
- * Only alerts when there is EVIDENCE-BASED rationale for action.
- * No mechanical rules like "down 8% = buy the dip."
+ * Market Opportunity Scanner v5 — Advisor-Grade Hybrid Scanner
+ * Mechanical precision + evidence conviction = world-class signals.
  *
- * Philosophy: A stock dropping 10% in isolation tells you nothing.
- * A stock dropping 10% while the broader market is flat tells you something is wrong WITH THIS STOCK.
- * A stock dropping 10% alongside a sector-wide rotation tells you the DIP is real.
+ * Confidence scoring (0-100) blends:
+ *   MECHANICAL (0-60 pts): RSI hard triggers, MA crossovers, volume 1.5x+,
+ *                           52w high position, portfolio drift thresholds
+ *   EVIDENCE  (0-40 pts):  Sector context, catalyst quality, R/R ratio,
+ *                           news sentiment, days-in-position
  *
- * v4 ADDITION: 38-ticker watchlist scanner — comprehensive entry/exit signals.
- *   BUY signals:  RSI oversold bounce, pullback to support, MA50 reclaim
- *   SELL signals: Sell-the-rip (overbought + extended), extended no-entry
- *   Only actionable alerts — no "HOLD" noise.
+ * Suppressed tickers — owned/held positions, repeat alerts silenced until:
+ *   AMGN: stop hit ($315.54) or target hit ($353.55) → re-alert
+ *   SMH:  pulled back to within 3% of 50d MA → re-alert for re-entry
+ *
+ * Scanner fires: BUY THE DIP / TRIM THE RIP only. All else silent.
  */
 
 import { getBatchQuotes, getSectorQuotes, getMacroQuotes, getWatchlistQuotes, calculatePositions } from "./market";
@@ -218,6 +220,27 @@ export async function scanForOpportunities(): Promise<Opportunity[]> {
   const portfolioValue = positions.reduce((sum, p) => sum + p.marketValue, 0) || 45648.95;
   const fullQuoteMap = new Map([...portfolioQuotes, ...sectorQuotes, ...macroQuotes, ...watchlistQuotes]);
 
+  // Suppressed ticker definitions — owned positions, silence repeat alerts
+  type SuppressedEntry = { stop: number; target: number; ma50?: number };
+  const SUPPRESSED: Record<string, SuppressedEntry> = {
+    AMGN: { stop: 315.54, target: 353.55 },
+    SMH:  { stop: 0,      target: 0,      ma50: 431.47 },
+  };
+  function isSuppressed(opp: Opportunity): boolean {
+    const s = SUPPRESSED[opp.ticker];
+    if (!s) return false;
+    if (opp.ticker === "AMGN") {
+      const p = fullQuoteMap.get("AMGN")?.price ?? 0;
+      return p === 0 || (p > s.stop && p < s.target);
+    }
+    if (opp.ticker === "SMH") {
+      const ma50 = s.ma50 ?? fullQuoteMap.get("SMH")?.ma50 ?? 0;
+      if (!ma50) return false;
+      return (fullQuoteMap.get("SMH")!.price / ma50 - 1) * 100 > 3;
+    }
+    return false;
+  }
+
   const marketContext = assessMarketContext(portfolioQuotes, sectorQuotes);
   const opportunities: Opportunity[] = [];
 
@@ -362,7 +385,16 @@ export async function scanForOpportunities(): Promise<Opportunity[]> {
     });
   }
 
-  return opportunities;
+  return opportunities.filter(o => !isSuppressed(o));
+}
+
+// ── Confidence Bar ───────────────────────────────────────────────────────────
+// Renders a visual 10-block bar: [████████░░] 80/100
+function confidenceBar(score: number): string {
+  const n = Math.min(100, Math.max(0, score));
+  const filled = Math.round(n / 10);
+  const bar = "█".repeat(filled) + "░".repeat(10 - filled);
+  return `[${bar}] ${Math.round(n)}/100`;
 }
 
 // ── Formatting ────────────────────────────────────────────────────────────────
@@ -392,7 +424,7 @@ export function formatOpportunityAlert(opps: Opportunity[]): string {
   });
 
   let output = `🚨 *MARKET ALERT* — ${timestamp}\n`;
-  output += `_38-ticker watchlist | Evidence-based only | No mechanical rules_\n\n`;
+  output += `_38-ticker watchlist | Advisor-grade hybrid scanner_\n\n`;
 
   // Section 1: BUY THE DIP
   if (buys.length > 0) {
@@ -400,7 +432,7 @@ export function formatOpportunityAlert(opps: Opportunity[]): string {
     for (const opp of buys) {
       const conf = opp.severity === "critical" ? "🚨" : "🟡";
       output += `${conf} *${opp.ticker}* — ${opp.action}`;
-      output += ` [${Math.round(opp.confidenceScore ?? 50)}/100]
+      output += `   ${confidenceBar(opp.confidenceScore ?? 50)}
 `;
       output += `   ${opp.rationale}\n`;
       output += `   ⚠️ ${opp.riskNote}\n`;
@@ -414,7 +446,7 @@ export function formatOpportunityAlert(opps: Opportunity[]): string {
     for (const opp of sells) {
       const conf = opp.severity === "critical" ? "🚨" : "🟡";
       output += `${conf} *${opp.ticker}* — ${opp.action}`;
-      output += ` [${Math.round(opp.confidenceScore ?? 50)}/100]
+      output += `   ${confidenceBar(opp.confidenceScore ?? 50)}
 `;
       output += `   ${opp.rationale}\n`;
       output += `   ⚠️ ${opp.riskNote}\n`;
