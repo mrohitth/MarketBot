@@ -200,6 +200,7 @@ export interface Opportunity {
   rationale: string;
   riskNote: string;
   details: string;
+  confidenceScore?: number;
 }
 
 export async function scanForOpportunities(): Promise<Opportunity[]> {
@@ -304,7 +305,17 @@ export async function scanForOpportunities(): Promise<Opportunity[]> {
     // Skip if already handled in this scan (PULLBACK_ENTRY wins over PEAK_ZONE)
     if (seenThisScan.has(alert.ticker)) continue;
 
-    opportunities.push(alert as Opportunity);
+    opportunities.push({
+      type: alert.type,
+      severity: alert.severity,
+      ticker: alert.ticker,
+      message: alert.message,
+      action: alert.action,
+      rationale: alert.rationale,
+      riskNote: alert.riskNote,
+      details: alert.details,
+      confidenceScore: alert.confidenceScore,
+    });
     seenThisScan.add(alert.ticker);
 
     if (alert.type === "momentum-peak") {
@@ -347,6 +358,7 @@ export async function scanForOpportunities(): Promise<Opportunity[]> {
       rationale: sig.rationale,
       riskNote: sig.riskNote,
       details: sig.details,
+      confidenceScore: sig.confidenceScore,
     });
   }
 
@@ -387,7 +399,9 @@ export function formatOpportunityAlert(opps: Opportunity[]): string {
     output += `📈 *BUY THE DIP* (${buys.length} signal${buys.length > 1 ? "s" : ""})\n`;
     for (const opp of buys) {
       const conf = opp.severity === "critical" ? "🚨" : "🟡";
-      output += `${conf} *${opp.ticker}* — ${opp.action}\n`;
+      output += `${conf} *${opp.ticker}* — ${opp.action}`;
+      output += ` [${opp.confidenceScore ?? opp.severity}/100]
+`;
       output += `   ${opp.rationale}\n`;
       output += `   ⚠️ ${opp.riskNote}\n`;
       output += `   📊 ${opp.details}\n\n`;
@@ -399,7 +413,9 @@ export function formatOpportunityAlert(opps: Opportunity[]): string {
     output += `✂️ *TRIM THE RIP* (${sells.length} signal${sells.length > 1 ? "s" : ""})\n`;
     for (const opp of sells) {
       const conf = opp.severity === "critical" ? "🚨" : "🟡";
-      output += `${conf} *${opp.ticker}* — ${opp.action}\n`;
+      output += `${conf} *${opp.ticker}* — ${opp.action}`;
+      output += ` [${opp.confidenceScore ?? opp.severity}/100]
+`;
       output += `   ${opp.rationale}\n`;
       output += `   ⚠️ ${opp.riskNote}\n`;
       output += `   📊 ${opp.details}\n\n`;
