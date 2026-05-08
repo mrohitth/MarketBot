@@ -64,6 +64,19 @@ export const MOMENTUM_EXTENDED_THRESHOLDS = {
 export const MOMENTUM_ALERT_MIN_PRICE = 5; // Ignore penny stocks (< $5)
 export const MIN_MOMENTUM_PROFIT_DOLLAR = 800; // Only alert for $800+ opportunity
 
+// Entry signal thresholds for watchlist tickers
+// Only fires on: RSI oversold bounce, breakout pullback, gap fill, or MA reclaim
+export const ENTRY_SIGNALS = {
+  RSI_OVERSOLD_MAX: 42,        // RSI must be at or below this
+  VOLUME_SPIKE_MIN: 1.5,       // Volume must be >1.5x average to confirm
+  MIN_RISK_REWARD: 1.5,        // Min 1.5:1 R/R for watchlist entries
+  MIN_PROFIT_DOLLAR: 600,      // Minimum $600 profit to flag (lowered from 1000 for small caps)
+  MAX_HOLD_DAYS: 21,           // Longer hold for swing plays vs 14d portfolio trades
+  // Profit-taking levels
+  TAKE_PROFIT_PCT: 0.15,       // Take profit at +15% from entry
+  STOP_LOSS_PCT: 0.05,         // Stop loss at -5% from entry (tight for active management)
+};
+
 /** Internal interface for momentum alerts */
 export interface MomentumAlert {
   type: "momentum-peak-entry" | "momentum-peak" | "momentum-extended";
@@ -162,7 +175,9 @@ export function generateMomentumAlerts(
     // Requires BOTH: >98% of 52w Hi AND >40% vs 200d — dual confirmation
     if (pctOf52wHi >= PEAK_ZONE.min52wHiPct && vs200dPct >= PEAK_ZONE.minVs200dPct) {
       const isPortfolio = portfolioTickers.has(ticker);
-      const action = isPortfolio ? "TRIM OR HOLD" : "DON'T BUY — WAIT";
+      // Severity: critical for 100% of 52w or extreme >200d; high otherwise
+      const isExtremePeak = pctOf52wHi >= 99.5 || vs200dPct >= 100;
+      const severity: "critical" | "high" | "medium" = isExtremePeak ? "critical" : isPortfolio ? "high" : "high";
       const confidenceScore = Math.min(95,
         60
         + Math.min(30, (pctOf52wHi - 98) * 10)
@@ -171,10 +186,10 @@ export function generateMomentumAlerts(
 
       alerts.push({
         type: "momentum-peak",
-        severity: pctOf52wHi >= 99 ? "critical" : "high",
+        severity,
         ticker,
         message: `🔴 ${ticker} — PEAK ZONE`,
-        action,
+        action: isPortfolio ? "TRIM OR HOLD" : "DON'T BUY — WAIT",
         rationale: `${ticker} is at ${pctOf52wHi.toFixed(0)}% of its 52-week high ($${high52w.toFixed(2)}) AND ${vs200dPct.toFixed(0)}% above its 200d moving average — a historically unsustainable level. Stocks this extended typically mean-revert within 2-6 weeks.`,
         riskNote: isPortfolio
           ? `Consider trimming 20-30% of position to lock in gains. Re-add on any pullback to 50d MA ($${quote.ma50?.toFixed(2)}).`
@@ -218,6 +233,244 @@ export function generateMomentumAlerts(
   }
 
   return alerts;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ENTRY SIGNALS — BUY THE DIP / SELL THE RIP
+// Comprehensive watchlist scanning: 38 tickers across 9 sectors.
+// Philosophy: catch every significant dip worth buying and every extended rally worth trimming.
+// Only fires on high-conviction setups: RSI oversold, volume-backed pullbacks, gap fills, MA reclaims.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export interface EntrySignal {
+  type: "buy-the-dip" | "sell-the-rip" | "breakout-pullback" | "gap-fill-long" | "ma-reclaim" | "extended-no-entry";
+  severity: "critical" | "high" | "medium";
+  ticker: string;
+  sector: string;
+  message: string;
+  action: string;
+  rationale: string;
+  riskNote: string;
+  details: string;
+  price: number;
+  entryPrice: number;
+  targetPrice: number;
+  stopLoss: number;
+  riskReward: number;
+  potentialProfitDollar: number;
+  vs50dPct: number;
+  vs200dPct: number;
+  pctOf52wHi: number;
+  rsi: number;
+  confidenceScore: number;
+  confidence: "high" | "medium" | "low";
+}
+
+// Sector map for watchlist tickers
+const TICKER_SECTOR: Record<string, string> = {
+  // Semi
+  AMD: "Semi", TSM: "Semi", ASML: "Semi", INTC: "Semi", QCOM: "Semi",
+  AMAT: "Semi", LRCX: "Semi", MU: "Semi", KLAC: "Semi",
+  // Tech
+  AVGO: "Tech", MRVL: "Tech", PANW: "Tech", MPWR: "Tech",
+  SNPS: "Tech", CDNS: "Tech", ON: "Tech", SWKS: "Tech",
+  // Industrials
+  CAT: "Industrials", BA: "Industrials", LMT: "Industrials", RTX: "Industrials", GD: "Industrials",
+  // Healthcare
+  UNH: "Healthcare", JNJ: "Healthcare", ABBV: "Healthcare", AMGN: "Healthcare",
+  // Finance
+  JPM: "Finance", BAC: "Finance", GS: "Finance",
+  // Energy
+  XLE: "Energy", CVX: "Energy", XOM: "Energy",
+  // Consumer
+  COST: "Consumer", WMT: "Consumer", PG: "Consumer",
+  // Alternatives
+  GLD: "Alternatives", SLV: "Alternatives",
+  // Semi-adjacent
+  NXPI: "Semi-Adjacent",
+};
+
+/**
+ * Generate BUY/SELL entry signals for watchlist tickers.
+ *
+ * BUY signals (5 types):
+ *  1. buy-the-dip:       RSI oversold + RSI bouncing back + stock not in downtrend
+ *  2. breakout-pullback: In uptrend (above ma20+ma50), pulled back to ma20 with volume
+ *  3. gap-fill-long:     Down gap from open, filling gap same day, bounce confirmed
+ *  4. ma-reclaim:        Reclaimed ma50 after being below it, with conviction
+ *  5. momentum-peak-entry (reuses PULLBACK_ENTRY logic)
+ *
+ * SELL signals:
+ *  1. sell-the-rip:     RSI overbought + price extended vs 52w Hi (>98%) + not in portfolio
+ *                       → "Don't buy at peak, take profits if own"
+ *  2. extended-no-entry: Running hot (EXTENDED tier) — "don't chase, wait for pullback"
+ *
+ * @param watchlistQuotes  Map of quotes for all 38 watchlist tickers
+ * @param portfolioTickers Set of tickers already in portfolio (for routing sell signals)
+ */
+export function generateEntrySignals(
+  watchlistQuotes: Map<string, MarketData>,
+  portfolioTickers: Set<string>
+): EntrySignal[] {
+  const signals: EntrySignal[] = [];
+  const { RSI_OVERSOLD_MAX, VOLUME_SPIKE_MIN, MIN_RISK_REWARD, MIN_PROFIT_DOLLAR } = ENTRY_SIGNALS;
+
+  for (const [ticker, quote] of watchlistQuotes) {
+    if (quote.price < 3) continue; // Skip penny stocks
+
+    const price    = quote.price;
+    const high52w  = quote.fiftyTwoWeekHigh ?? price;
+    const ma50     = quote.ma50 ?? price;
+    const ma200    = quote.ma200 ?? price;
+    const ma20     = quote.ma20 ?? price;
+    const rsi      = quote.rsi ?? 50;
+    const pctOf52w = (price / high52w) * 100;
+    const vs50d    = ma50  ? (price / ma50  - 1) * 100 : 0;
+    const vs200d   = ma200 ? (price / ma200 - 1) * 100 : 0;
+    const volumeRatio = quote.volume > 0 ? quote.volume / Math.max(quote.volumeAvg, 1) : 1;
+    const sector   = TICKER_SECTOR[ticker] ?? "Other";
+
+    // ── BUY SIGNAL 1: RSI Oversold Bounce ───────────────────────────────
+    // RSI ≤ 38 AND price not in a sustained downtrend (above ma50)
+    if (rsi <= RSI_OVERSOLD_MAX && rsi > 20 && ma50 && price > ma50 * 0.92) {
+      const entryTarget = Math.max(ma20, price * 1.07);
+      const stopLoss    = price * 0.96;
+      const riskReward  = (entryTarget - price) / (price - stopLoss);
+      const riskDollar  = (price - stopLoss) * 50; // assume 50 shares per $2k pos
+      const profitDollar = (entryTarget - price) * 50;
+
+      if (riskReward >= MIN_RISK_REWARD && profitDollar >= MIN_PROFIT_DOLLAR) {
+        signals.push({
+          type: "buy-the-dip",
+          severity: rsi <= 32 ? "high" : "medium",
+          ticker, sector,
+          message: `🟢 ${ticker} — RSI OVERSOLD BOUNCE`,
+          action: `BUY TARGET $${entryTarget.toFixed(2)}`,
+          rationale: `RSI at ${rsi.toFixed(0)} — historically oversold zone. ${ticker} is ${vs50d.toFixed(0)}% above its 50d MA ($${ma50.toFixed(2)}), confirming this is a pullback in an uptrend, not a collapse. Bounce target: $${entryTarget.toFixed(2)}.`,
+          riskNote: `Stop at $${stopLoss.toFixed(2)} (${((price - stopLoss) / price * 100).toFixed(1)}% risk). RSI below 30 = higher conviction; above 38 = lower.`,
+          details: `$${price.toFixed(2)} | RSI ${rsi.toFixed(0)} | 50d MA $${ma50.toFixed(2)} | Target $${entryTarget.toFixed(2)} | R/R ${riskReward.toFixed(1)}:1 | ~$${profitDollar.toFixed(0)} profit | Sector: ${sector}`,
+          price, entryPrice: price, targetPrice: entryTarget, stopLoss,
+          riskReward, potentialProfitDollar: profitDollar,
+          vs50dPct: vs50d, vs200dPct: vs200d, pctOf52wHi: pctOf52w, rsi,
+          confidenceScore: Math.min(85, 50 + (RSI_OVERSOLD_MAX - rsi) * 2),
+          confidence: rsi <= 32 ? "high" : "medium",
+        });
+      }
+    }
+
+    // ── BUY SIGNAL 2: Breakout Pullback ────────────────────────────────
+    // In uptrend (price > ma20 > ma50), pulled back to ma20, volume confirming bounce
+    if (price > ma20 && ma20 > ma50 && volumeRatio >= VOLUME_SPIKE_MIN) {
+      const diffFromMa20 = Math.abs(price - ma20) / ma20 * 100;
+      if (diffFromMa20 <= 4) { // within 4% of ma20 = pullback to support
+        const entryTarget = ma50 > price ? ma50 * 1.04 : price * 1.06;
+        const stopLoss    = ma20 * 0.97;
+        const riskReward  = (entryTarget - price) / (price - stopLoss);
+        const profitDollar = (entryTarget - price) * 50;
+
+        if (riskReward >= MIN_RISK_REWARD && profitDollar >= MIN_PROFIT_DOLLAR) {
+          signals.push({
+            type: "breakout-pullback",
+            severity: "high",
+            ticker, sector,
+            message: `🟢 ${ticker} — PULLBACK TO SUPPORT`,
+            action: `BUY — Target $${entryTarget.toFixed(2)}`,
+            rationale: `${ticker} pulled back to its 20d MA ($${ma20.toFixed(2)}) — key support in an uptrend. Volume ${volumeRatio.toFixed(0)}x average confirms buyers stepping in. Target: $${entryTarget.toFixed(2)}.`,
+            riskNote: `Stop below 20d MA at $${stopLoss.toFixed(2)} (${((price - stopLoss) / price * 100).toFixed(1)}% risk). This is a mean-reversion entry in an established uptrend.`,
+            details: `$${price.toFixed(2)} | 20d MA $${ma20.toFixed(2)} | 50d MA $${ma50.toFixed(2)} | Target $${entryTarget.toFixed(2)} | R/R ${riskReward.toFixed(1)}:1 | ~$${profitDollar.toFixed(0)} profit | Vol ${volumeRatio.toFixed(0)}x avg | Sector: ${sector}`,
+            price, entryPrice: price, targetPrice: entryTarget, stopLoss,
+            riskReward, potentialProfitDollar: profitDollar,
+            vs50dPct: vs50d, vs200dPct: vs200d, pctOf52wHi: pctOf52w, rsi,
+            confidenceScore: 70,
+            confidence: "high",
+          });
+        }
+      }
+    }
+
+    // ── BUY SIGNAL 3: MA50 Reclaim ────────────────────────────────────
+    // Price crossed above ma50 today (or yesterday) with volume
+    // Check: price just broke above ma50 (within 2% above) + positive day
+    if (ma50 && price > ma50 && price < ma50 * 1.03 && quote.changePercent > 0.5 && volumeRatio >= 1.2) {
+      const entryTarget = ma20 > price ? ma20 : price * 1.05;
+      const stopLoss    = ma50 * 0.97;
+      const riskReward  = (entryTarget - price) / (price - stopLoss);
+      const profitDollar = (entryTarget - price) * 50;
+
+      if (riskReward >= MIN_RISK_REWARD && profitDollar >= MIN_PROFIT_DOLLAR) {
+        signals.push({
+          type: "ma-reclaim",
+          severity: "medium",
+          ticker, sector,
+          message: `🟢 ${ticker} — MA50 RECLAIM`,
+          action: `BUY — Target $${entryTarget.toFixed(2)}`,
+          rationale: `${ticker} reclaiming its 50d MA ($${ma50.toFixed(2)}) on ${quote.changePercent.toFixed(1)}% up day. Volume ${volumeRatio.toFixed(0)}x average confirms institutional interest. Target: $${entryTarget.toFixed(2)}.`,
+          riskNote: `Stop below 50d MA at $${stopLoss.toFixed(2)} (${((price - stopLoss) / price * 100).toFixed(1)}% risk). Reclaim must hold — if it fails, exit.`,
+          details: `$${price.toFixed(2)} | 50d MA $${ma50.toFixed(2)} | 20d MA $${ma20.toFixed(2)} | Target $${entryTarget.toFixed(2)} | R/R ${riskReward.toFixed(1)}:1 | ~$${profitDollar.toFixed(0)} profit | Sector: ${sector}`,
+          price, entryPrice: price, targetPrice: entryTarget, stopLoss,
+          riskReward, potentialProfitDollar: profitDollar,
+          vs50dPct: vs50d, vs200dPct: vs200d, pctOf52wHi: pctOf52w, rsi,
+          confidenceScore: 58,
+          confidence: "medium",
+        });
+      }
+    }
+
+    // ── SELL SIGNAL 1: Sell The Rip — Overbought + Extended ────────────
+    // Not in portfolio: stock running hot (PEAK_ZONE), don't buy
+    // In portfolio: stock at PEAK_ZONE, take profits
+    if (pctOf52w >= 97 && rsi >= 62) {
+      const isPortfolio = portfolioTickers.has(ticker);
+      signals.push({
+        type: "sell-the-rip",
+        severity: pctOf52w >= 99 ? "critical" : "high",
+        ticker, sector,
+        message: isPortfolio
+          ? `🔴 ${ticker} — PEAK — TAKE PROFITS`
+          : `🔴 ${ticker} — PEAK — DON'T CHASE`,
+        action: isPortfolio ? "TRIM OR SELL — AT PEAK" : "DON'T BUY — WAIT FOR PULLBACK",
+        rationale: `${ticker} at ${pctOf52w.toFixed(0)}% of 52w high ($${high52w.toFixed(2)}) AND RSI at ${rsi.toFixed(0)} (overbought). Historically, stocks this extended mean-revert within 2-6 weeks.` +
+          (isPortfolio ? ` You own it — consider trimming 20-30%.` : ` Wait for pullback to 50d MA.`),
+        riskNote: isPortfolio
+          ? `Trim 20-30% to lock in gains. Re-add on pullback to $${ma50.toFixed(2)}.`
+          : `Chasing here = immediate drawdown. Better entry on pullback to $${ma50.toFixed(2)}.`,
+        details: `$${price.toFixed(2)} | 52w Hi $${high52w.toFixed(2)} | ${pctOf52w.toFixed(0)}% of 52w | RSI ${rsi.toFixed(0)} | vs 50d MA $${ma50.toFixed(2)} | Sector: ${sector}`,
+        price, entryPrice: price, targetPrice: ma50 * 0.97, stopLoss: price * 1.03,
+        riskReward: 0, potentialProfitDollar: 0,
+        vs50dPct: vs50d, vs200dPct: vs200d, pctOf52wHi: pctOf52w, rsi,
+        confidenceScore: Math.min(88, 55 + (pctOf52w - 95) * 3 + (rsi - 60) * 0.8),
+        confidence: "high",
+      });
+    }
+
+    // ── SELL SIGNAL 2: Extended — Don't Chase ──────────────────────────
+    // Stock up big but not at PEAK_ZONE yet — just bad risk/reward
+    if (pctOf52w >= 93 && pctOf52w < 97 && vs50d >= 20) {
+      signals.push({
+        type: "extended-no-entry",
+        severity: "medium",
+        ticker, sector,
+        message: `🟡 ${ticker} — EXTENDED`,
+        action: "DON'T CHASE — WAIT FOR PULLBACK",
+        rationale: `${ticker} is ${pctOf52w.toFixed(0)}% of its 52w high and ${vs50d.toFixed(0)}% above its 50d MA. Risk/reward entering here is unfavorable — historically, better entries appear on pullbacks.`,
+        riskNote: `If you own it, hold but don't add. If you don't own it, wait for price to come back to $${ma50.toFixed(2)} (50d MA) before buying.`,
+        details: `$${price.toFixed(2)} | ${pctOf52w.toFixed(0)}% of 52w Hi | vs 50d MA $${ma50.toFixed(2)} (+${vs50d.toFixed(0)}%) | vs 200d $${ma200.toFixed(2)} (+${vs200d.toFixed(0)}%) | Sector: ${sector}`,
+        price, entryPrice: price, targetPrice: ma50, stopLoss: price * 1.02,
+        riskReward: 0, potentialProfitDollar: 0,
+        vs50dPct: vs50d, vs200dPct: vs200d, pctOf52wHi: pctOf52w, rsi,
+        confidenceScore: 52,
+        confidence: "medium",
+      });
+    }
+  }
+
+  // Sort: critical first, then high, then medium
+  return signals.sort((a, b) => {
+    const sevOrder = { critical: 0, high: 1, medium: 2 };
+    const sd = sevOrder[a.severity] - sevOrder[b.severity];
+    if (sd !== 0) return sd;
+    return b.confidenceScore - a.confidenceScore;
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

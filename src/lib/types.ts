@@ -190,14 +190,53 @@ export interface BudgetLimits {
   savingsRateTarget: number;
 }
 
-// === Ticker Scopes (re-exported from recommendations.ts for backward compat) ===
+// === Ticker Scopes ===
 
 export const PORTFOLIO_TICKERS = ["VTI", "NVDA", "VOO", "QQQ", "SMH", "SCHG", "VXUS", "SCHD", "SPYD", "ASTS", "SPAXX"] as const;
 export const MACRO_TICKERS = ["SPY", "QQQ", "DXY", "TLT", "GLD"] as const;
+
+/**
+ * WATCHLIST_TICKERS — 38 stocks across 9 sectors for entry/exit scanning.
+ * Philosophy: scan a wide field so we catch every dip worth buying and every peak worth selling.
+ * - Each sector: 2-9 tickers — enough to find the BEST entry, not just ANY entry
+ * - Only actionable tickers: RSI oversold bounces, breakout pullsback to MA, gap fills
+ * - No penny stocks (<$5), no illiquid tickers
+ *
+ * Category breakdown:
+ *   Semi (9):   AMD, TSM, ASML, INTC, QCOM, AMAT, LRCX, MU, KLAC
+ *   Tech (8):   AVGO, MRVL, PANW, MPWR, SNPS, CDNS, ON, SWKS
+ *   Industrials (5): CAT, BA, LMT, RTX, GD
+ *   Healthcare (4): UNH, JNJ, ABBV, AMGN
+ *   Finance (3): JPM, BAC, GS
+ *   Energy (3): XLE, CVX, XOM
+ *   Cons/Retail (3): COST, WMT, PG
+ *   Alternatives (2): GLD, SLV
+ *   Semi-adjacent (1): NXPI
+ */
+export const WATCHLIST_TICKERS = [
+  // Semi — 9 tickers (core of AI infrastructure theme)
+  "AMD", "TSM", "ASML", "INTC", "QCOM", "AMAT", "LRCX", "MU", "KLAC",
+  // Tech — 8 tickers (picks-and-shovels + enterprise)
+  "AVGO", "MRVL", "PANW", "MPWR", "SNPS", "CDNS", "ON", "SWKS",
+  // Industrials — 5 tickers (defense + infrastructure capex)
+  "CAT", "BA", "LMT", "RTX", "GD",
+  // Healthcare — 4 tickers (stable growth + dividends)
+  "UNH", "JNJ", "ABBV", "AMGN",
+  // Finance — 3 tickers (buffett-lensed value)
+  "JPM", "BAC", "GS",
+  // Energy — 3 tickers (reflation play + dividends)
+  "XLE", "CVX", "XOM",
+  // Consumer — 3 tickers (stable dividends + growth)
+  "COST", "WMT", "PG",
+  // Alternatives — 2 tickers (gold + silver hedge)
+  "GLD", "SLV",
+  // Semi-adjacent — 1 ticker
+  "NXPI",
+] as const;
+
 export const SECTOR_TICKERS = [
   "AMD", "TSM", "ASML", "INTC", "QCOM", "AMAT", "LRCX", "MU", "SOXX", "SMH",
   "AVGO", "MRVL", "PANW", "MPWR", "CDNS", "SNPS", "ON", "LSCC", "ENTG", "SWKS",
-  // Defensive/Cyclical sector rotation candidates
   "XLE", "XLI", "XLB", "VHT", "VBR", "AVUV",
 ] as const;
 

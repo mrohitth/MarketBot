@@ -1,5 +1,5 @@
 /**
- * Market Opportunity Scanner v3 — runs every 2 hours.
+ * Market Opportunity Scanner v4 — runs every 30 min.
  * Only alerts when there is EVIDENCE-BASED rationale for action.
  * No mechanical rules like "down 8% = buy the dip."
  *
@@ -7,19 +7,20 @@
  * A stock dropping 10% while the broader market is flat tells you something is wrong WITH THIS STOCK.
  * A stock dropping 10% alongside a sector-wide rotation tells you the DIP is real.
  *
- * v3 ADDITION: MOMENTUM_EXTENDED alerts — three-tier peak detection system
- *   TIER 1 (🟡 EXTENDED):     >95% of 52w Hi AND >25% vs 50d      → "running hot, don't chase"
- *   TIER 2 (🔴 PEAK_ZONE):    >98% of 52w Hi AND >40% vs 200d     → "peak zone, trim or wait"
- *   TIER 3 (💎 PULLBACK):     After PEAK_ZONE, stock back to 50d  → "buy the dip after peak"
+ * v4 ADDITION: 38-ticker watchlist scanner — comprehensive entry/exit signals.
+ *   BUY signals:  RSI oversold bounce, pullback to support, MA50 reclaim
+ *   SELL signals: Sell-the-rip (overbought + extended), extended no-entry
+ *   Only actionable alerts — no "HOLD" noise.
  */
 
-import { getBatchQuotes, getSectorQuotes, getMacroQuotes, calculatePositions } from "./market";
+import { getBatchQuotes, getSectorQuotes, getMacroQuotes, getWatchlistQuotes, calculatePositions } from "./market";
 import { getHoldingsFromPortfolio } from "./fidelity";
 import {
   BLACK_SWAN_THRESHOLD_PCT,
   rankSetups,
   generateTradeSetups,
   generateMomentumAlerts,
+  generateEntrySignals,
 } from "./recommendations";
 
 import * as fs from "fs";
@@ -202,17 +203,19 @@ export interface Opportunity {
 }
 
 export async function scanForOpportunities(): Promise<Opportunity[]> {
-  const [portfolioQuotes, sectorQuotes, macroQuotes, holdings] = await Promise.all([
+  // Fetch all four quote groups in parallel — Yahoo Finance is I/O-bound, batching helps
+  const [portfolioQuotes, sectorQuotes, macroQuotes, watchlistQuotes, holdings] = await Promise.all([
     getBatchQuotes(),
     getSectorQuotes(),
     getMacroQuotes(),
+    getWatchlistQuotes(),
     getHoldingsFromPortfolio(),
   ]);
 
-  const allQuotes = new Map([...portfolioQuotes, ...sectorQuotes]);
+  const allQuotes = new Map([...portfolioQuotes, ...sectorQuotes, ...watchlistQuotes]);
   const positions = calculatePositions(portfolioQuotes, holdings);
   const portfolioValue = positions.reduce((sum, p) => sum + p.marketValue, 0) || 45648.95;
-  const fullQuoteMap = new Map([...portfolioQuotes, ...sectorQuotes, ...macroQuotes]);
+  const fullQuoteMap = new Map([...portfolioQuotes, ...sectorQuotes, ...macroQuotes, ...watchlistQuotes]);
 
   const marketContext = assessMarketContext(portfolioQuotes, sectorQuotes);
   const opportunities: Opportunity[] = [];
@@ -323,6 +326,30 @@ export async function scanForOpportunities(): Promise<Opportunity[]> {
     } catch { /* non-fatal */ }
   }
 
+  // ── 4. WATCHLIST ENTRY SIGNALS — 38 Tickers, 9 Sectors ─────────────────
+  // watchlistQuotes already fetched above in parallel with everything else
+  // Generate buy/sell signals for the full watchlist
+  const entrySignals = generateEntrySignals(watchlistQuotes, portfolioTickerSet);
+
+  for (const sig of entrySignals) {
+    // Only show critical/high — medium watchlist signals are informational only
+    if (sig.severity === "medium") continue;
+    // Skip tickers already handled as PEAK_ZONE this scan to avoid duplicate alerts
+    if (seenThisScan.has(sig.ticker)) continue;
+    seenThisScan.add(sig.ticker);
+
+    opportunities.push({
+      type: sig.type,
+      severity: sig.severity,
+      ticker: sig.ticker,
+      message: sig.message,
+      action: sig.action,
+      rationale: sig.rationale,
+      riskNote: sig.riskNote,
+      details: sig.details,
+    });
+  }
+
   return opportunities;
 }
 
@@ -331,17 +358,62 @@ export async function scanForOpportunities(): Promise<Opportunity[]> {
 export function formatOpportunityAlert(opps: Opportunity[]): string {
   if (opps.length === 0) return "";
 
-  let output = `🚨 *MARKET ALERT* — ${new Date().toLocaleString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short" })}\n`;
-  output += `_Evidence-based only. No mechanical rules._\n\n`;
+  // Separate opportunities into output sections
+  const buys = opps.filter(o =>
+    o.action.startsWith("BUY") || o.action.includes("PULLBACK ENTRY")
+  );
+  const sells = opps.filter(o =>
+    o.action.startsWith("TRIM") || o.action.startsWith("SELL")
+  );
+  const peakNoChase = opps.filter(o =>
+    (o.action.includes("DON'T BUY") || o.action.includes("DON'T CHASE") || o.action.includes("WAIT"))
+    && !o.action.startsWith("BUY") && !o.action.startsWith("TRIM") && !o.action.startsWith("SELL")
+  );
 
-  for (const opp of opps) {
-    const sev = opp.severity === "critical" ? "🚨" : opp.severity === "high" ? "🟡" : "🟢";
-    output += `${sev} *${opp.ticker}*\n`;
-    output += `${opp.message}\n`;
-    output += `→ Action: *${opp.action}*\n`;
-    output += `📋 Rationale: ${opp.rationale}\n`;
-    output += `⚠️ Risk: ${opp.riskNote}\n`;
-    output += `${opp.details}\n\n`;
+  // If nothing actionable (no buys, no trims, no pullbacks), stay silent
+  if (buys.length === 0 && sells.length === 0) {
+    return ""; // scanner will output "no alerts meet evidence threshold"
+  }
+
+  const timestamp = new Date().toLocaleString("en-US", {
+    hour: "numeric", minute: "2-digit", timeZoneName: "short",
+  });
+
+  let output = `🚨 *MARKET ALERT* — ${timestamp}\n`;
+  output += `_38-ticker watchlist | Evidence-based only | No mechanical rules_\n\n`;
+
+  // Section 1: BUY THE DIP
+  if (buys.length > 0) {
+    output += `📈 *BUY THE DIP* (${buys.length} signal${buys.length > 1 ? "s" : ""})\n`;
+    for (const opp of buys) {
+      const conf = opp.severity === "critical" ? "🚨" : "🟡";
+      output += `${conf} *${opp.ticker}* — ${opp.action}\n`;
+      output += `   ${opp.rationale}\n`;
+      output += `   ⚠️ ${opp.riskNote}\n`;
+      output += `   📊 ${opp.details}\n\n`;
+    }
+  }
+
+  // Section 2: TRIM THE RIP
+  if (sells.length > 0) {
+    output += `✂️ *TRIM THE RIP* (${sells.length} signal${sells.length > 1 ? "s" : ""})\n`;
+    for (const opp of sells) {
+      const conf = opp.severity === "critical" ? "🚨" : "🟡";
+      output += `${conf} *${opp.ticker}* — ${opp.action}\n`;
+      output += `   ${opp.rationale}\n`;
+      output += `   ⚠️ ${opp.riskNote}\n`;
+      output += `   📊 ${opp.details}\n\n`;
+    }
+  }
+
+  // Optional: peek at what's extended but not actionable yet
+  const extended = peakNoChase.filter(o =>
+    o.type === "momentum-peak" || o.type === "sell-the-rip" || o.type === "momentum-extended"
+  );
+  if (extended.length > 0) {
+    const tickers = extended.slice(0, 8).map(o => o.ticker).join(", ");
+    output += `🔭 *EXTENDED + ON RADAR* — ${tickers}${extended.length > 8 ? ` +${extended.length - 8} more` : ""}\n`;
+    output += `_Peak zone / extended — don't chase. Will alert on pullback._\n\n`;
   }
 
   output += `_Reply BUY / SELL / WATCH / IGNORE to act._`;

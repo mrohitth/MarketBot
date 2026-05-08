@@ -1,4 +1,4 @@
-import { MarketData, Position, TradeRecommendation, TICKERS, MACRO_TICKERS, SECTOR_TICKERS } from "./types";
+import { MarketData, Position, TradeRecommendation, TICKERS, MACRO_TICKERS, SECTOR_TICKERS, WATCHLIST_TICKERS } from "./types";
 import {
   PORTFOLIO_TARGET_ALLOCATION,
   DRIFT_THRESHOLDS_ADVISORY,
@@ -76,6 +76,10 @@ export async function getMacroQuotes(): Promise<Map<string, MarketData>> {
 
 export async function getSectorQuotes(): Promise<Map<string, MarketData>> {
   return fetchQuotesForTickers(SECTOR_TICKERS);
+}
+
+export async function getWatchlistQuotes(): Promise<Map<string, MarketData>> {
+  return fetchQuotesForTickers(WATCHLIST_TICKERS);
 }
 
 // ── RSI Constants ─────────────────────────────────────────────────────────────
