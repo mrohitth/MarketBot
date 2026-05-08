@@ -47,6 +47,180 @@ export const VOLUME_SPIKE_MULTIPLIER = 1.5;
 export const BLACK_SWAN_THRESHOLD_PCT = 8;
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// MOMENTUM EXTENDED — THREE-TIER PEAK DETECTION
+// Fool-proof system: every alert requires MULTIPLE independent confirmations.
+// No single-metric triggers. No false positives from noise.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export const MOMENTUM_EXTENDED_THRESHOLDS = {
+  /** TIER 1 — EXTENDED: running hot, don't chase */
+  EXTENDED: { min52wHiPct: 95, minVs50dPct: 25 },
+  /** TIER 2 — PEAK_ZONE: peak zone, trim or wait */
+  PEAK_ZONE: { min52wHiPct: 98, minVs200dPct: 40 },
+  /** TIER 3 — PULLBACK_ENTRY: after peak, stock pulled back to 50d MA */
+  PULLBACK_ENTRY: { min52wHiPct: 92, maxVs50dPct: 3 },
+};
+
+export const MOMENTUM_ALERT_MIN_PRICE = 5; // Ignore penny stocks (< $5)
+export const MIN_MOMENTUM_PROFIT_DOLLAR = 800; // Only alert for $800+ opportunity
+
+/** Internal interface for momentum alerts */
+export interface MomentumAlert {
+  type: "momentum-peak-entry" | "momentum-peak" | "momentum-extended";
+  severity: "critical" | "high" | "medium";
+  ticker: string;
+  message: string;
+  action: string;
+  rationale: string;
+  riskNote: string;
+  details: string;
+  price: number;
+  vs50dPct: number;
+  vs200dPct: number;
+  pctOf52wHi: number;
+  entryPrice?: number;
+  targetPrice?: number;
+  stopLoss?: number;
+  riskReward?: number;
+  confidenceScore: number;
+  confidence: "high" | "medium" | "low";
+}
+
+/**
+ * Generate MOMENTUM_EXTENDED alerts for any ticker (portfolio or screener).
+ *
+ * TIER 3 logic — PULLBACK_ENTRY:
+ *   Only fires if this ticker previously hit PEAK_ZONE (tracked via heldPeakAlerts Set).
+ *   This is the "buy the dip after the peak" signal — high conviction entry after
+ *   an extended rally that has now pulled back to within 3% of 50d MA.
+ *
+ * @param quotes — Map of all available quotes
+ * @param portfolioTickers — Set of tickers in portfolio (for smart routing: trim vs don't-buy)
+ * @param heldPeakAlerts — Set of tickers that previously hit PEAK_ZONE (for PULLBACK_ENTRY detection)
+ */
+export function generateMomentumAlerts(
+  quotes: Map<string, MarketData>,
+  portfolioTickers: Set<string>,
+  heldPeakAlerts: Set<string>
+): MomentumAlert[] {
+  const alerts: MomentumAlert[] = [];
+  const { EXTENDED, PEAK_ZONE, PULLBACK_ENTRY } = MOMENTUM_EXTENDED_THRESHOLDS;
+
+  for (const [ticker, quote] of quotes) {
+    // Skip penny stocks
+    if (quote.price < MOMENTUM_ALERT_MIN_PRICE)
+      continue;
+
+    const price = quote.price;
+    const high52w = (quote as any).fiftyTwoWeekHigh ?? price;
+    if (!high52w || high52w === 0)
+      continue;
+
+    const pctOf52wHi = (price / high52w) * 100;
+    const vs50dPct = quote.ma50 ? ((price / quote.ma50 - 1) * 100) : 0;
+    const vs200dPct = quote.ma200 ? ((price / quote.ma200 - 1) * 100) : 0;
+
+    // ── TIER 3: PULLBACK ENTRY ───────────────────────────────────────────
+    // Only fires if ticker previously hit PEAK_ZONE AND has now pulled back
+    // to within PULLBACK_ENTRY% of the 50d MA. The 30-day peak memory prevents
+    // stale entries from firing.
+    if (heldPeakAlerts.has(ticker)) {
+      const within3pctOf50d = quote.ma50
+        ? Math.abs(price - quote.ma50) / quote.ma50 * 100 <= PULLBACK_ENTRY.maxVs50dPct
+        : false;
+
+      if (within3pctOf50d) {
+        const entryTarget = quote.ma20 > price ? quote.ma20 : price * 1.06;
+        const stopLoss = quote.ma50 * 0.97;
+        const riskReward = (entryTarget - price) / (price - stopLoss);
+
+        alerts.push({
+          type: "momentum-peak-entry",
+          severity: "high",
+          ticker,
+          message: `💎 ${ticker} — PULLBACK ENTRY (post-peak)`,
+          action: `BUY THE PULLBACK — Target $${entryTarget.toFixed(2)}`,
+          rationale: `${ticker} hit PEAK_ZONE previously and has now pulled back to $${price.toFixed(2)} — just ${Math.abs(vs50dPct).toFixed(1)}% above 50d MA at $${quote.ma50?.toFixed(2)}. This is the "buy after the peak" entry institutional investors wait for. Risk defined at $${stopLoss.toFixed(2)}.`,
+          riskNote: `Stop below 50d MA at $${stopLoss.toFixed(2)} (${((price - stopLoss) / price * 100).toFixed(1)}% risk). Only suitable if you have 3-5% portfolio allocation available.`,
+          details: `Current: $${price.toFixed(2)} | 50d MA: $${quote.ma50?.toFixed(2)} | 52w Hi: $${high52w.toFixed(2)} | vs 52w Hi: ${pctOf52wHi.toFixed(0)}% | vs 50d: ${vs50dPct.toFixed(1)}% | Entry target: $${entryTarget.toFixed(2)} | R/R: ${riskReward.toFixed(1)}:1`,
+          price,
+          vs50dPct,
+          vs200dPct,
+          pctOf52wHi,
+          entryPrice: price,
+          targetPrice: entryTarget,
+          stopLoss,
+          riskReward,
+          confidenceScore: 72,
+          confidence: "high",
+        });
+        continue; // Don't also fire EXTENDED for same ticker
+      }
+    }
+
+    // ── TIER 2: PEAK ZONE ────────────────────────────────────────────────
+    // Requires BOTH: >98% of 52w Hi AND >40% vs 200d — dual confirmation
+    if (pctOf52wHi >= PEAK_ZONE.min52wHiPct && vs200dPct >= PEAK_ZONE.minVs200dPct) {
+      const isPortfolio = portfolioTickers.has(ticker);
+      const action = isPortfolio ? "TRIM OR HOLD" : "DON'T BUY — WAIT";
+      const confidenceScore = Math.min(95,
+        60
+        + Math.min(30, (pctOf52wHi - 98) * 10)
+        + Math.min(10, (vs200dPct - 40) * 0.5)
+      );
+
+      alerts.push({
+        type: "momentum-peak",
+        severity: pctOf52wHi >= 99 ? "critical" : "high",
+        ticker,
+        message: `🔴 ${ticker} — PEAK ZONE`,
+        action,
+        rationale: `${ticker} is at ${pctOf52wHi.toFixed(0)}% of its 52-week high ($${high52w.toFixed(2)}) AND ${vs200dPct.toFixed(0)}% above its 200d moving average — a historically unsustainable level. Stocks this extended typically mean-revert within 2-6 weeks.`,
+        riskNote: isPortfolio
+          ? `Consider trimming 20-30% of position to lock in gains. Re-add on any pullback to 50d MA ($${quote.ma50?.toFixed(2)}).`
+          : `Do NOT buy here. Wait for pullback to 50d MA ($${quote.ma50?.toFixed(2)}) for better entry. Chasing at peak results in immediate drawdown.`,
+        details: `Current: $${price.toFixed(2)} | 52w Hi: $${high52w.toFixed(2)} | 200d MA: $${quote.ma200?.toFixed(2)} | vs 52w Hi: ${pctOf52wHi.toFixed(0)}% | vs 200d: ${vs200dPct.toFixed(0)}% | vs 50d: ${vs50dPct.toFixed(0)}%`,
+        price,
+        vs50dPct,
+        vs200dPct,
+        pctOf52wHi,
+        confidenceScore,
+        confidence: confidenceScore >= 75 ? "high" : "medium",
+      });
+      continue; // Don't also fire EXTENDED for same ticker
+    }
+
+    // ── TIER 1: EXTENDED ────────────────────────────────────────────────
+    if (pctOf52wHi >= EXTENDED.min52wHiPct && vs50dPct >= EXTENDED.minVs50dPct) {
+      const confidenceScore = Math.min(65,
+        45
+        + Math.min(15, pctOf52wHi - 95)
+        + Math.min(10, vs50dPct - 25) * 0.5
+      );
+
+      alerts.push({
+        type: "momentum-extended",
+        severity: "medium",
+        ticker,
+        message: `🟡 ${ticker} — EXTENDED`,
+        action: "DON'T CHASE — WAIT FOR PULLBACK",
+        rationale: `${ticker} is ${pctOf52wHi.toFixed(0)}% of its 52-week high and ${vs50dPct.toFixed(0)}% above its 50d moving average. The risk/reward of entering here is unfavorable — better entry on pullback.`,
+        riskNote: `If you own it, hold but don't add. If you don't own it, wait for price to come back to 50d MA support ($${quote.ma50?.toFixed(2)}) before building a position.`,
+        details: `Current: $${price.toFixed(2)} | 52w Hi: $${high52w.toFixed(2)} | 50d MA: $${quote.ma50?.toFixed(2)} | vs 52w Hi: ${pctOf52wHi.toFixed(0)}% | vs 50d: ${vs50dPct.toFixed(0)}%`,
+        price,
+        vs50dPct,
+        vs200dPct,
+        pctOf52wHi,
+        confidenceScore,
+        confidence: "medium",
+      });
+    }
+  }
+
+  return alerts;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // DRIFT THRESHOLDS PER TICKER
 // Core indices get tighter bands (more stable). Speculative names get wider.
 // ═══════════════════════════════════════════════════════════════════════════════

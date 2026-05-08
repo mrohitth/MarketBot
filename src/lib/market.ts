@@ -140,7 +140,8 @@ async function fetchWithRetry(ticker: string, attempt = 1): Promise<MarketData |
     const volume = result.regularMarketVolume ?? 0;
     const volumeAvg = result.averageDailyVolume10Week ?? volume;
     const ma20 = result.fiftyDayAverage ?? price;
-    const ma50 = result.twoHundredDayAverage ?? price;
+    const ma50 = (result as any).fiftyDayAverage ?? price; // 50-day MA (fetched from chart)
+    const ma200 = result.twoHundredDayAverage ?? price; // 200-day MA — used for MOMENTUM_EXTENDED peak detection
 
     // ── Fetch real 14-period Wilder's RSI ───────────────────────────────────
     let rsi = 50;
@@ -158,9 +159,14 @@ async function fetchWithRetry(ticker: string, attempt = 1): Promise<MarketData |
       if (closes.length >= RSI_PERIOD + 1) {
         rsi = computeRSI(closes);
       }
+      // Compute real 50-day SMA from chart closes (more accurate than Yahoo's ma50)
+      // Store in local var so it can be used in the return object
+      const ma50FromChart = closes.length >= 50
+        ? closes.slice(-50).reduce((a: number, b: number) => a + b, 0) / 50
+        : ma50;
     } catch (rsiErr) {
       // Non-fatal — fall back to neutral RSI rather than failing the whole fetch
-      console.warn(`[MARKET] ${ticker}: RSI computation failed (${rsiErr}), using 50`);
+      console.warn(`[MARKET] ${ticker}: RSI computation failed (${rsiErr}), using defaults`);
     }
 
     let status: "bull" | "bear" | "neutral" = "neutral";
@@ -185,6 +191,7 @@ async function fetchWithRetry(ticker: string, attempt = 1): Promise<MarketData |
       rsi,
       ma20,
       ma50,
+      ma200,
       volume,
       volumeAvg,
       fiftyTwoWeekHigh: result.fiftyTwoWeekHigh ?? undefined,

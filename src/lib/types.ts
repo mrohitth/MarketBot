@@ -50,9 +50,10 @@ export interface MarketData {
   rsi: number;
   ma20: number;
   ma50: number;
+  ma200?: number; // 200-day moving average — used for MOMENTUM_EXTENDED peak detection
   volume: number;
   volumeAvg: number;
-  fiftyTwoWeekHigh?: number;
+  fiftyTwoWeekHigh?: number; // 52-week high — used for PEAK_ZONE detection
   status: "bull" | "bear" | "neutral";
   signals: string[];
 }
