@@ -400,7 +400,7 @@ export function formatOpportunityAlert(opps: Opportunity[]): string {
     for (const opp of buys) {
       const conf = opp.severity === "critical" ? "🚨" : "🟡";
       output += `${conf} *${opp.ticker}* — ${opp.action}`;
-      output += ` [${opp.confidenceScore ?? opp.severity}/100]
+      output += ` [${Math.round(opp.confidenceScore ?? 50)}/100]
 `;
       output += `   ${opp.rationale}\n`;
       output += `   ⚠️ ${opp.riskNote}\n`;
@@ -414,7 +414,7 @@ export function formatOpportunityAlert(opps: Opportunity[]): string {
     for (const opp of sells) {
       const conf = opp.severity === "critical" ? "🚨" : "🟡";
       output += `${conf} *${opp.ticker}* — ${opp.action}`;
-      output += ` [${opp.confidenceScore ?? opp.severity}/100]
+      output += ` [${Math.round(opp.confidenceScore ?? 50)}/100]
 `;
       output += `   ${opp.rationale}\n`;
       output += `   ⚠️ ${opp.riskNote}\n`;
