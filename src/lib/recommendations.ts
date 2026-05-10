@@ -358,12 +358,15 @@ export function generateEntrySignals(
       }
     }
 
-    // ── BUY SIGNAL 1B: Deep Pullback in Oversold Sector ────────────────
-    // RSI 38-45 AND price just below MA50 — sector ETFs bouncing from real pullbacks
+    // ──     // ── BUY SIGNAL 1B: Deep Pullback in Oversold Sector ────────────────────────
+    // RSI 38-55 AND price just below MA50 — but MA50 must be rising (not resistance)
     // XLE/XLV/VHT case: RSI ~40, price -3% below MA50 → accumulate toward MA50 reclaim
+    const ma50Rising = (quote.ma50Slope ?? 0) >= 0; // positive slope = rising MA50 = pullback in uptrend
+
     if (
       rsi >= 38 && rsi <= 55 &&
-      ma50 && price > ma50 * 0.93 && price < ma50
+      ma50 && price > ma50 * 0.93 && price < ma50 &&
+      ma50Rising
     ) {
       const entryTarget = ma50; // target: reclaim 50d MA
       const stopLoss    = ma50 * 0.94;
@@ -389,7 +392,7 @@ export function generateEntrySignals(
       }
     }
 
-    // ── BUY SIGNAL 2: Breakout Pullback ────────────────────────────────
+// ── BUY SIGNAL 2: Breakout Pullback ────────────────────────────────
     // In uptrend (price > ma20 > ma50), pulled back to ma20, volume confirming bounce
     if (price > ma20 && ma20 > ma50 && volumeRatio >= VOLUME_SPIKE_MIN) {
       const diffFromMa20 = Math.abs(price - ma20) / ma20 * 100;

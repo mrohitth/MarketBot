@@ -50,6 +50,7 @@ export interface MarketData {
   rsi: number;
   ma20: number;
   ma50: number;
+  ma50Slope?: number; // 5-day % change in MA50 — positive = rising, negative = falling
   ma200?: number; // 200-day moving average — used for MOMENTUM_EXTENDED peak detection
   volume: number;
   volumeAvg: number;

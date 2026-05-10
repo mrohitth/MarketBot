@@ -54,6 +54,7 @@ async function fetchQuotesForTickers(tickers: readonly string[]): Promise<Map<st
           rsi: 50,
           ma20: lkp.price,
           ma50: lkp.price,
+          ma50Slope: 0,
           volume: 0,
           volumeAvg: 0,
           status: "neutral",
@@ -143,6 +144,7 @@ async function fetchWithRetry(ticker: string, attempt = 1): Promise<MarketData |
 
     // ── Fetch real 14-period Wilder's RSI ───────────────────────────────────
     let rsi = 50;
+    let ma50Slope = 0;
     try {
       const now = new Date();
       const threeMonthsAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
@@ -162,6 +164,13 @@ async function fetchWithRetry(ticker: string, attempt = 1): Promise<MarketData |
       const ma50FromChart = closes.length >= 50
         ? closes.slice(-50).reduce((a: number, b: number) => a + b, 0) / 50
         : ma50;
+      // MA50 slope: compare current MA50 vs MA50 5 days ago (5d % change)
+      const ma50_5d_ago = closes.length >= 55
+        ? closes.slice(-55, -5).reduce((a: number, b: number) => a + b, 0) / 50
+        : ma50FromChart;
+      ma50Slope = ma50_5d_ago > 0
+        ? ((ma50FromChart - ma50_5d_ago) / ma50_5d_ago) * 100
+        : 0;
     } catch (rsiErr) {
       // Non-fatal — fall back to neutral RSI rather than failing the whole fetch
       console.warn(`[MARKET] ${ticker}: RSI computation failed (${rsiErr}), using defaults`);
@@ -189,6 +198,7 @@ async function fetchWithRetry(ticker: string, attempt = 1): Promise<MarketData |
       rsi,
       ma20,
       ma50,
+      ma50Slope: +ma50Slope.toFixed(3),
       ma200,
       volume,
       volumeAvg,
@@ -316,16 +326,16 @@ export function formatPositionsForBrief(positions: Position[]): string {
 export function getMockQuotes(): Map<string, MarketData> {
   const quotes = new Map<string, MarketData>();
   const tickers: Array<[string, MarketData]> = [
-    ["VTI", { ticker: "VTI", price: 260.00, previousClose: 257.00, change: 3.00, changePercent: 1.17, rsi: 55, ma20: 258.00, ma50: 255.00, volume: 3000000, volumeAvg: 2800000, status: "bull", signals: ["above_ma20"] }],
-    ["NVDA", { ticker: "NVDA", price: 198.45, previousClose: 202.00, change: -3.55, changePercent: -1.76, rsi: 52, ma20: 205.00, ma50: 210.00, volume: 42000000, volumeAvg: 40000000, status: "bear", signals: ["below_ma20", "below_ma50"] }],
-    ["VOO", { ticker: "VOO", price: 450.00, previousClose: 447.00, change: 3.00, changePercent: 0.67, rsi: 58, ma20: 448.00, ma50: 445.00, volume: 3000000, volumeAvg: 3200000, status: "neutral", signals: ["above_ma20"] }],
-    ["QQQ", { ticker: "QQQ", price: 674.15, previousClose: 670.00, change: 4.15, changePercent: 0.62, rsi: 60, ma20: 668.00, ma50: 660.00, volume: 45000000, volumeAvg: 42000000, status: "bull", signals: ["above_ma20"] }],
-    ["SMH", { ticker: "SMH", price: 522.69, previousClose: 515.00, change: 7.69, changePercent: 1.49, rsi: 58, ma20: 520.00, ma50: 515.00, volume: 8500000, volumeAvg: 9000000, status: "bull", signals: ["above_ma20"] }],
-    ["SCHG", { ticker: "SCHG", price: 33.14, previousClose: 32.90, change: 0.24, changePercent: 0.73, rsi: 56, ma20: 33.00, ma50: 32.50, volume: 3200000, volumeAvg: 3000000, status: "bull", signals: ["above_ma20"] }],
-    ["VXUS", { ticker: "VXUS", price: 82.97, previousClose: 82.00, change: 0.97, changePercent: 1.18, rsi: 54, ma20: 82.00, ma50: 81.00, volume: 4500000, volumeAvg: 4200000, status: "bull", signals: ["above_ma20"] }],
-    ["SCHD", { ticker: "SCHD", price: 31.86, previousClose: 31.50, change: 0.36, changePercent: 1.14, rsi: 57, ma20: 31.50, ma50: 31.00, volume: 5200000, volumeAvg: 5000000, status: "bull", signals: ["above_ma20"] }],
-    ["SPYD", { ticker: "SPYD", price: 45.00, previousClose: 44.50, change: 0.50, changePercent: 1.12, rsi: 53, ma20: 44.80, ma50: 44.20, volume: 400000, volumeAvg: 380000, status: "bull", signals: ["above_ma20"] }],
-    ["ASTS", { ticker: "ASTS", price: 10.00, previousClose: 11.00, change: -1.00, changePercent: -9.09, rsi: 38, ma20: 11.50, ma50: 12.00, volume: 1500000, volumeAvg: 1200000, status: "bear", signals: ["below_ma20", "rsi_oversold"] }],
+    ["VTI", { ticker: "VTI", price: 260.00, previousClose: 257.00, change: 3.00, changePercent: 1.17, rsi: 55, ma20: 258.00, ma50: 255.00, ma50Slope: 0, volume: 3000000, volumeAvg: 2800000, status: "bull", signals: ["above_ma20"] }],
+    ["NVDA", { ticker: "NVDA", price: 198.45, previousClose: 202.00, change: -3.55, changePercent: -1.76, rsi: 52, ma20: 205.00, ma50: 210.00, ma50Slope: 0, volume: 42000000, volumeAvg: 40000000, status: "bear", signals: ["below_ma20", "below_ma50"] }],
+    ["VOO", { ticker: "VOO", price: 450.00, previousClose: 447.00, change: 3.00, changePercent: 0.67, rsi: 58, ma20: 448.00, ma50: 445.00, ma50Slope: 0, volume: 3000000, volumeAvg: 3200000, status: "neutral", signals: ["above_ma20"] }],
+    ["QQQ", { ticker: "QQQ", price: 674.15, previousClose: 670.00, change: 4.15, changePercent: 0.62, rsi: 60, ma20: 668.00, ma50: 660.00, ma50Slope: 0, volume: 45000000, volumeAvg: 42000000, status: "bull", signals: ["above_ma20"] }],
+    ["SMH", { ticker: "SMH", price: 522.69, previousClose: 515.00, change: 7.69, changePercent: 1.49, rsi: 58, ma20: 520.00, ma50: 515.00, ma50Slope: 0, volume: 8500000, volumeAvg: 9000000, status: "bull", signals: ["above_ma20"] }],
+    ["SCHG", { ticker: "SCHG", price: 33.14, previousClose: 32.90, change: 0.24, changePercent: 0.73, rsi: 56, ma20: 33.00, ma50: 32.50, ma50Slope: 0, volume: 3200000, volumeAvg: 3000000, status: "bull", signals: ["above_ma20"] }],
+    ["VXUS", { ticker: "VXUS", price: 82.97, previousClose: 82.00, change: 0.97, changePercent: 1.18, rsi: 54, ma20: 82.00, ma50: 81.00, ma50Slope: 0, volume: 4500000, volumeAvg: 4200000, status: "bull", signals: ["above_ma20"] }],
+    ["SCHD", { ticker: "SCHD", price: 31.86, previousClose: 31.50, change: 0.36, changePercent: 1.14, rsi: 57, ma20: 31.50, ma50: 31.00, ma50Slope: 0, volume: 5200000, volumeAvg: 5000000, status: "bull", signals: ["above_ma20"] }],
+    ["SPYD", { ticker: "SPYD", price: 45.00, previousClose: 44.50, change: 0.50, changePercent: 1.12, rsi: 53, ma20: 44.80, ma50: 44.20, ma50Slope: 0, volume: 400000, volumeAvg: 380000, status: "bull", signals: ["above_ma20"] }],
+    ["ASTS", { ticker: "ASTS", price: 10.00, previousClose: 11.00, change: -1.00, changePercent: -9.09, rsi: 38, ma20: 11.50, ma50: 12.00, ma50Slope: 0, volume: 1500000, volumeAvg: 1200000, status: "bear", signals: ["below_ma20", "rsi_oversold"] }],
   ];
   for (const [ticker, data] of tickers) quotes.set(ticker, data);
   return quotes;

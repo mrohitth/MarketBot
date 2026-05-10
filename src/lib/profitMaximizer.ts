@@ -115,12 +115,12 @@ export function formatProfitMaximizerForBrief(ideas: ProfitMaximizerIdea[]): str
 export function getMockSectorQuotes(): Map<string, MarketData> {
   const quotes = new Map<string, MarketData>();
   const data: Array<[string, MarketData]> = [
-    ["AMD", { ticker: "AMD", price: 165.50, previousClose: 168.00, change: -2.50, changePercent: -1.49, rsi: 32, ma20: 172.00, ma50: 175.00, volume: 55000000, volumeAvg: 45000000, status: "bear", signals: ["rsi_oversold", "below_ma20"] }],
-    ["TSM", { ticker: "TSM", price: 148.75, previousClose: 145.00, change: 3.75, changePercent: 2.59, rsi: 58, ma20: 147.50, ma50: 150.00, volume: 25000000, volumeAvg: 18000000, status: "bull", signals: ["above_ma20", "volume_spike"] }],
-    ["ASML", { ticker: "ASML", price: 890.00, previousClose: 885.00, change: 5.00, changePercent: 0.56, rsi: 55, ma20: 880.00, ma50: 870.00, volume: 800000, volumeAvg: 900000, status: "neutral", signals: ["above_ma20"] }],
-    ["SOXX", { ticker: "SOXX", price: 215.60, previousClose: 208.00, change: 7.60, changePercent: 3.65, rsi: 62, ma20: 210.00, ma50: 205.00, volume: 4500000, volumeAvg: 2800000, status: "bull", signals: ["breakout_ma20", "volume_spike"] }],
-    ["AVGO", { ticker: "AVGO", price: 1450.00, previousClose: 1440.00, change: 10.00, changePercent: 0.69, rsi: 58, ma20: 1440.00, ma50: 1420.00, volume: 2000000, volumeAvg: 2100000, status: "bull", signals: ["above_ma20"] }],
-    ["MU", { ticker: "MU", price: 95.50, previousClose: 93.00, change: 2.50, changePercent: 2.69, rsi: 48, ma20: 94.00, ma50: 96.00, volume: 18000000, volumeAvg: 15000000, status: "bull", signals: ["above_ma20", "volume_spike"] }],
+    ["AMD", { ticker: "AMD", price: 165.50, previousClose: 168.00, change: -2.50, changePercent: -1.49, rsi: 32, ma20: 172.00, ma50: 175.00, ma50Slope: 0, volume: 55000000, volumeAvg: 45000000, status: "bear", signals: ["rsi_oversold", "below_ma20"] }],
+    ["TSM", { ticker: "TSM", price: 148.75, previousClose: 145.00, change: 3.75, changePercent: 2.59, rsi: 58, ma20: 147.50, ma50: 150.00, ma50Slope: 0, volume: 25000000, volumeAvg: 18000000, status: "bull", signals: ["above_ma20", "volume_spike"] }],
+    ["ASML", { ticker: "ASML", price: 890.00, previousClose: 885.00, change: 5.00, changePercent: 0.56, rsi: 55, ma20: 880.00, ma50: 870.00, ma50Slope: 0, volume: 800000, volumeAvg: 900000, status: "neutral", signals: ["above_ma20"] }],
+    ["SOXX", { ticker: "SOXX", price: 215.60, previousClose: 208.00, change: 7.60, changePercent: 3.65, rsi: 62, ma20: 210.00, ma50: 205.00, ma50Slope: 0, volume: 4500000, volumeAvg: 2800000, status: "bull", signals: ["breakout_ma20", "volume_spike"] }],
+    ["AVGO", { ticker: "AVGO", price: 1450.00, previousClose: 1440.00, change: 10.00, changePercent: 0.69, rsi: 58, ma20: 1440.00, ma50: 1420.00, ma50Slope: 0, volume: 2000000, volumeAvg: 2100000, status: "bull", signals: ["above_ma20"] }],
+    ["MU", { ticker: "MU", price: 95.50, previousClose: 93.00, change: 2.50, changePercent: 2.69, rsi: 48, ma20: 94.00, ma50: 96.00, ma50Slope: 0, volume: 18000000, volumeAvg: 15000000, status: "bull", signals: ["above_ma20", "volume_spike"] }],
   ];
   for (const [t, d] of data) quotes.set(t, d);
   return quotes;
