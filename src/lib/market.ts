@@ -147,7 +147,7 @@ async function fetchWithRetry(ticker: string, attempt = 1): Promise<MarketData |
     let ma50Slope = 0;
     try {
       const now = new Date();
-      const threeMonthsAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+      const threeMonthsAgo = new Date(now.getTime() - 100 * 24 * 60 * 60 * 1000); // 100d to ensure 90+ trading days for Wilder RSI seeding + MA50 slope
       const period1 = threeMonthsAgo.toISOString().split("T")[0];
       const period2 = now.toISOString().split("T")[0];
       const chartResult = await yahooFinance.chart(ticker, { period1, period2, interval: "1d" });
