@@ -37,6 +37,9 @@ export const SWING_TAKE_PROFIT_RSI = 68;
 /** Target gain % for swing exit */
 export const SWING_TARGET_GAIN_PCT = 0.10; // 10% target
 
+/** Trailing stop — once position hits target, trail with this % below highest price */
+export const TRAILING_STOP_PCT = 0.05; // 5% trailing stop after target is hit
+
 /** Max hold days per swing */
 export const SWING_MAX_HOLD_DAYS = 14;
 
@@ -50,6 +53,8 @@ export interface SwingPosition {
   entryDate: string;
   targetPrice: number;
   stopLoss: number;
+  trailingStopPrice: number; // active only after position crosses targetPrice
+  trailingStopPct: number;
   signal: string;
   confidenceScore: number;
   riskReward: number;
@@ -154,6 +159,8 @@ export function openSwingPosition(setup: TradeSetup, shares: number): void {
     entryDate: new Date().toISOString(),
     targetPrice: setup.targetPrice,
     stopLoss: setup.stopLoss,
+    trailingStopPrice: 0, // starts inactive (0 = not set)
+    trailingStopPct: TRAILING_STOP_PCT,
     signal: setup.signal,
     confidenceScore: setup.confidenceScore,
     riskReward: setup.riskReward,
@@ -188,8 +195,26 @@ export function checkSwingPositions(quotes: Map<string, { price: number; rsi: nu
     const pnl = (currentPrice - pos.entryPrice) * pos.shares;
     const pnlPct = (currentPrice - pos.entryPrice) / pos.entryPrice;
 
-    // Take profit: price hit target OR RSI overbought
-    if (currentPrice >= pos.targetPrice || quote.rsi >= SWING_TAKE_PROFIT_RSI) {
+    // ── TRAILING STOP LOGIC ────────────────────────────────────────────────────────
+    // Phase 1 (initial): stop is the hard stopLoss
+    // Phase 2 (target reached): activate 5% trailing stop
+    // Phase 3 (trailing): update trailingStopPrice upward as price rises, exit on breach
+    let activeStop = pos.stopLoss;
+    if (pos.trailingStopPrice > 0) {
+      // Trailing is active — price has crossed target before
+      const newTrailing = currentPrice * (1 - pos.trailingStopPct);
+      pos.trailingStopPrice = Math.max(pos.trailingStopPrice, newTrailing);
+      activeStop = pos.trailingStopPrice;
+    } else if (currentPrice >= pos.targetPrice) {
+      // Target just crossed — activate trailing stop for first time
+      pos.trailingStopPrice = currentPrice * (1 - pos.trailingStopPct);
+      activeStop = pos.trailingStopPrice;
+      pos.notes += ` | 📈 Target hit at $${currentPrice.toFixed(2)} — trailing stop armed at $${pos.trailingStopPrice.toFixed(2)}`;
+      console.log(`[SWING] ${pos.ticker} crossed target at $${currentPrice.toFixed(2)} — trailing stop activated at $${pos.trailingStopPrice.toFixed(2)}`);
+    }
+
+    // Take profit: price hit target OR RSI overbought (only before trailing is active)
+    if (!pos.trailingStopPrice && (currentPrice >= pos.targetPrice || quote.rsi >= SWING_TAKE_PROFIT_RSI)) {
       const proceeds = currentPrice * pos.shares;
       state.capital += proceeds;
       state.realizedPnL += pnl;
@@ -198,8 +223,9 @@ export function checkSwingPositions(quotes: Map<string, { price: number; rsi: nu
       return false;
     }
 
-    // Stop loss hit
-    if (currentPrice <= pos.stopLoss) {
+    // Stop loss hit (or trailing stop breached)
+    if (currentPrice <= activeStop) {
+      const isTrailing = pos.trailingStopPrice > 0;
       const proceeds = currentPrice * pos.shares;
       state.capital += proceeds;
       state.realizedPnL += pnl;

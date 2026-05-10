@@ -363,10 +363,13 @@ export function generateEntrySignals(
     // XLE/XLV/VHT case: RSI ~40, price -3% below MA50 → accumulate toward MA50 reclaim
     const ma50Rising = (quote.ma50Slope ?? 0) >= 0; // positive slope = rising MA50 = pullback in uptrend
 
+    // Filter: price must be within 10% below MA50. Deeper than that = structural weakness, not a pullback.
+    const vs50dPct = ma50 ? ((price - ma50) / ma50) * 100 : 0;
     if (
       rsi >= 38 && rsi <= 55 &&
-      ma50 && price > ma50 * 0.93 && price < ma50 &&
-      ma50Rising
+      ma50 && price > ma50 * 0.90 && price < ma50 &&
+      ma50Rising &&
+      vs50dPct >= -10 // cap: reject if >10% below MA50 (CVX was -6%, XLE is -3.8%)
     ) {
       const entryTarget = ma50; // target: reclaim 50d MA
       const stopLoss    = ma50 * 0.94;
