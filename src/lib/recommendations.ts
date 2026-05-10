@@ -262,6 +262,8 @@ export interface EntrySignal {
   vs200dPct: number;
   pctOf52wHi: number;
   rsi: number;
+  ma50?: number;
+  ma50Slope?: number;
   confidenceScore: number;
   confidence: "high" | "medium" | "low";
 }
@@ -389,6 +391,7 @@ export function generateEntrySignals(
           price, entryPrice: price, targetPrice: entryTarget, stopLoss,
           riskReward, potentialProfitDollar: profitDollar,
           vs50dPct: vs50d, vs200dPct: vs200d, pctOf52wHi: pctOf52w, rsi,
+          ma50, ma50Slope: quote.ma50Slope ?? 0,
           confidenceScore: Math.min(85, 60 + (42 - rsi) * 2),
           confidence: rsi <= 40 ? "high" : "medium",
         });

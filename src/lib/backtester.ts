@@ -42,7 +42,7 @@ interface SetupTrade {
   entryPrice: number;
   exitDate?: string;
   exitPrice?: number;
-  exitReason?: "target" | "stop" | "expired";
+  exitReason?: "target" | "stop" | "gap_stop" | "expired";
   realizedRR?: number;
   realizedProfitDollar?: number;
   holdDays: number;
@@ -260,16 +260,20 @@ async function runBacktest(tickers: string[], days: number) {
         // Walk forward up to MAX_HOLD_DAYS looking for target or stop
         let exitDate: string | undefined;
         let exitPrice: number | undefined;
-        let exitReason: "target" | "stop" | "expired" | undefined;
+        let exitReason: "target" | "stop" | "gap_stop" | "expired" | undefined;
 
         for (let d = 1; d <= MAX_HOLD_DAYS && i + 1 + d < bars.length; d++) {
           const testBar = bars[i + 1 + d];
 
-          // Stop hit
-          if (testBar.low <= setup.stopLoss) {
+          // Stop hit — use open price if gap-down (open < stopLoss), else low
+          // This prevents optimistic "fill at stopLoss" assumption on overnight gaps
+          const stopTriggerPrice = testBar.low <= setup.stopLoss
+            ? (testBar.open < setup.stopLoss ? testBar.open : setup.stopLoss)
+            : Infinity;
+          if (stopTriggerPrice < Infinity) {
             exitDate = testBar.date;
-            exitPrice = setup.stopLoss;
-            exitReason = "stop";
+            exitPrice = stopTriggerPrice;
+            exitReason = testBar.open < setup.stopLoss ? "gap_stop" : "stop";
             break;
           }
 
@@ -374,7 +378,7 @@ async function runBacktest(tickers: string[], days: number) {
     .map(t => t.realizedRR ?? 0)
     .filter(r => r > 0);
   const allLoserRRs = allTrades
-    .filter(t => t.exitReason === "stop")
+    .filter(t => t.exitReason === "stop" || t.exitReason === "gap_stop")
     .map(t => t.realizedRR ?? 0)
     .filter(r => r < 0);
 
@@ -414,7 +418,7 @@ async function runBacktest(tickers: string[], days: number) {
     if (!bySignal[sig]) bySignal[sig] = { total: 0, winners: 0, losers: 0 };
     bySignal[sig].total++;
     if (t.exitReason === "target") bySignal[sig].winners++;
-    else if (t.exitReason === "stop") bySignal[sig].losers++;
+    else if (t.exitReason === "stop" || t.exitReason === "gap_stop") bySignal[sig].losers++;
   }
 
   console.log("\n🎯 SIGNAL-TYPE BREAKDOWN");
