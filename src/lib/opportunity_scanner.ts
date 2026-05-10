@@ -24,6 +24,7 @@ import {
   generateMomentumAlerts,
   generateEntrySignals,
 } from "./recommendations";
+import { runDiscovery, formatDiscoverySummary } from "./market_discovery";
 
 import * as fs from "fs";
 import * as path from "path";
@@ -360,7 +361,22 @@ export async function scanForOpportunities(): Promise<Opportunity[]> {
     } catch { /* non-fatal */ }
   }
 
-  // ── 4. WATCHLIST ENTRY SIGNALS — 38 Tickers, 9 Sectors ─────────────────
+  // ── 5. MARKET DISCOVERY — Tag-Along + Warm Bench ──────────────────
+  // Discovery runs every scan for tag-along; volume screen gates itself.
+  try {
+    const discoverySummary = formatDiscoverySummary();
+    // If queue already has entries, just append the existing summary
+    // (no need to re-scan every 30 min if nothing changed)
+    if (!discoverySummary) {
+      // No pending discoveries — run a fresh discovery scan
+      console.log("[SCANNER] Running market discovery pass...");
+      await runDiscovery();
+    }
+  } catch (err) {
+    console.warn("[SCANNER] Discovery pass skipped:", (err as Error).message);
+  }
+
+  // ── 6. WATCHLIST ENTRY SIGNALS — 38 Tickers, 9 Sectors ─────────────────
   // watchlistQuotes already fetched above in parallel with everything else
   // Generate buy/sell signals for the full watchlist
   const entrySignals = generateEntrySignals(watchlistQuotes, portfolioTickerSet);
@@ -416,8 +432,11 @@ export function formatOpportunityAlert(opps: Opportunity[]): string {
     && !o.action.startsWith("BUY") && !o.action.startsWith("TRIM") && !o.action.startsWith("SELL")
   );
 
-  // If nothing actionable (no buys, no trims, no pullbacks), stay silent
-  if (buys.length === 0 && sells.length === 0) {
+  // Check if there are discoveries to show even when no trade signals
+  const discoverySummary = formatDiscoverySummary();
+
+  // If nothing actionable (no buys, no trims, no pullbacks) AND no discoveries, stay silent
+  if (buys.length === 0 && sells.length === 0 && !discoverySummary) {
     return ""; // scanner will output "no alerts meet evidence threshold"
   }
 
@@ -464,6 +483,11 @@ export function formatOpportunityAlert(opps: Opportunity[]): string {
     const tickers = extended.slice(0, 8).map(o => o.ticker).join(", ");
     output += `🔭 *EXTENDED + ON RADAR* — ${tickers}${extended.length > 8 ? ` +${extended.length - 8} more` : ""}\n`;
     output += `_Peak zone / extended — don't chase. Will alert on pullback._\n\n`;
+  }
+
+  // ── Discovery Summary ─────────────────────────────────────────────
+  if (discoverySummary) {
+    output += discoverySummary;
   }
 
   output += `_Reply BUY / SELL / WATCH / IGNORE to act._`;
