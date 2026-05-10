@@ -12,8 +12,18 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import https from "https";
 import { MarketData, WATCHLIST_TICKERS, PORTFOLIO_TICKERS } from "./types";
+
+// Lazy-loaded yahoo-finance2 instance (only created when needed)
+let _yf: any = null;
+async function getYahooFinance() {
+  if (!_yf) {
+    const mod = await import("yahoo-finance2");
+    const YF = (mod as any).default ?? mod;
+    _yf = new YF({ suppressNotices: ["yahooSurvey"] });
+  }
+  return _yf;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CONFIGURATION
@@ -21,8 +31,8 @@ import { MarketData, WATCHLIST_TICKERS, PORTFOLIO_TICKERS } from "./types";
 
 const DISCOVERY_QUEUE_FILE = "./data/discovery-queue.json";
 const VOLUME_GATE_FILE = "./data/discovery-volume-gate.txt";  // Contains last volume screen timestamp
-const FINNHUB_TOKEN = process.env.FINNHUB_API_KEY || "d7udjm1r01qnv95n7mi0g";
-const FINNHUB_NEWS_URL = `https://finnhub.io/api/v1/news?category=general&token=${FINNHUB_TOKEN}`;
+// Yahoo Finance is used for news (no API key required).
+// Finnhub was removed due to expired API key.
 
 /** Tickers the system already tracks — don't "discover" these */
 const KNOWN_TICKERS = new Set([
@@ -111,36 +121,49 @@ export interface DiscoveryResult {
 // NEWS FETCHING
 // ═══════════════════════════════════════════════════════════════════════════════
 
-interface FinnhubNewsItem {
-  category: string;
-  datetime: number;
-  headline: string;
-  id: number;
-  image?: string;
-  related: string;
-  source: string;
-  summary: string;
-  url: string;
+/** Yahoo Finance news item shape */
+interface YahooNewsItem {
+  title: string;
+  summary?: string;
+  link?: string;
+  publisher?: string;
+  providerPublishTime?: number;
 }
 
-function fetchNews(): Promise<FinnhubNewsItem[]> {
-  return new Promise((resolve, reject) => {
-    https.get(FINNHUB_NEWS_URL, (res) => {
-      let data = "";
-      res.on("data", (chunk: string) => data += chunk);
-      res.on("end", () => {
-        try {
-          const parsed = JSON.parse(data);
-          resolve(Array.isArray(parsed) ? parsed.slice(0, 20) : []);
-        } catch {
-          resolve([]);
-        }
-      });
-    }).on("error", (err) => {
-      console.warn(`[DISCOVERY] Finnhub news fetch failed: ${err.message}`);
-      resolve([]);
-    });
-  });
+/**
+ * Fetch general market news via Yahoo Finance search (no API key needed).
+ * Returns up to 20 headlines for tag-along parsing.
+ */
+async function fetchNews(): Promise<{ headline: string; summary: string; datetime: number }[]> {
+  try {
+    const yf = await getYahooFinance();
+    const queries = ["stock market", "markets today", "tech stocks"];
+    const seen = new Set<string>();
+    const results: { headline: string; summary: string; datetime: number }[] = [];
+
+    for (const query of queries) {
+      const res = await yf.search(query, { newsCount: 10 });
+      const newsItems: YahooNewsItem[] = (res as any).news ?? [];
+      for (const item of newsItems) {
+        const headline = item.title?.trim() ?? "";
+        if (!headline || seen.has(headline)) continue;
+        seen.add(headline);
+        results.push({
+          headline,
+          summary: item.summary?.trim() ?? "",
+          datetime: item.providerPublishTime ?? Math.floor(Date.now() / 1000),
+        });
+        if (results.length >= 20) break;
+      }
+      if (results.length >= 20) break;
+    }
+
+    console.log(`[DISCOVERY] Fetched ${results.length} headlines via Yahoo Finance`);
+    return results;
+  } catch (err) {
+    console.warn(`[DISCOVERY] Yahoo Finance news fetch failed: ${(err as Error).message}`);
+    return [];
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -194,7 +217,7 @@ interface TagAlongCandidate {
   headline: string;
 }
 
-function findTagAlongs(news: FinnhubNewsItem[]): TagAlongCandidate[] {
+function findTagAlongs(news: { headline: string; summary: string; datetime: number }[]): TagAlongCandidate[] {
   // Pool all known ticker set
   const found: TagAlongCandidate[] = [];
   const seen = new Set<string>(); // avoid duplicate (ticker, headline) combos
@@ -236,9 +259,7 @@ async function fetchDiscoveryQuote(ticker: string): Promise<{
   volume: number; volumeAvg: number; fiftyTwoWeekHigh: number; changePct: number;
 } | null> {
   try {
-    const mod = await import("yahoo-finance2");
-    const YF = (mod as any).default ?? mod;
-    const yf = new YF({ suppressNotices: ["yahooSurvey"] });
+    const yf = await getYahooFinance();
     const result = await yf.quote(ticker);
 
     if (!result || typeof result.regularMarketPrice !== "number") return null;
