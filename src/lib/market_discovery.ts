@@ -12,6 +12,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import https from "https";
 import { MarketData, WATCHLIST_TICKERS, PORTFOLIO_TICKERS } from "./types";
 
 // Lazy-loaded yahoo-finance2 instance (only created when needed)
@@ -31,8 +32,8 @@ async function getYahooFinance() {
 
 const DISCOVERY_QUEUE_FILE = "./data/discovery-queue.json";
 const VOLUME_GATE_FILE = "./data/discovery-volume-gate.txt";  // Contains last volume screen timestamp
-// Yahoo Finance is used for news (no API key required).
-// Finnhub was removed due to expired API key.
+const FINNHUB_TOKEN = process.env.FINNHUB_API_KEY || "d7udjm1r01qnv95n7mi0d7udjm1r01qnv95n7mig";
+const FINNHUB_NEWS_URL = `https://finnhub.io/api/v1/news?category=general&token=${FINNHUB_TOKEN}`;
 
 /** Tickers the system already tracks — don't "discover" these */
 const KNOWN_TICKERS = new Set([
@@ -121,6 +122,18 @@ export interface DiscoveryResult {
 // NEWS FETCHING
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/** Finnhub news item shape */
+interface FinnhubItem {
+  category: string;
+  datetime: number;
+  headline: string;
+  id: number;
+  related: string;
+  summary: string;
+  source: string;
+  url: string;
+}
+
 /** Yahoo Finance news item shape */
 interface YahooNewsItem {
   title: string;
@@ -131,39 +144,75 @@ interface YahooNewsItem {
 }
 
 /**
- * Fetch general market news via Yahoo Finance search (no API key needed).
- * Returns up to 20 headlines for tag-along parsing.
+ * Fetch news from Finnhub + Yahoo Finance, merge, deduplicate.
+ * Finnhub provides structured headlines (wider coverage), Yahoo provides
+ * finance-specific news. Together they catch more tag-along opportunities.
  */
 async function fetchNews(): Promise<{ headline: string; summary: string; datetime: number }[]> {
+  const seen = new Set<string>();
+  const results: { headline: string; summary: string; datetime: number }[] = [];
+
+  // ── Source 1: Finnhub ───────────────────────────────────────────────
   try {
-    const yf = await getYahooFinance();
-    const queries = ["stock market", "markets today", "tech stocks"];
-    const seen = new Set<string>();
-    const results: { headline: string; summary: string; datetime: number }[] = [];
-
-    for (const query of queries) {
-      const res = await yf.search(query, { newsCount: 10 });
-      const newsItems: YahooNewsItem[] = (res as any).news ?? [];
-      for (const item of newsItems) {
-        const headline = item.title?.trim() ?? "";
-        if (!headline || seen.has(headline)) continue;
-        seen.add(headline);
-        results.push({
-          headline,
-          summary: item.summary?.trim() ?? "",
-          datetime: item.providerPublishTime ?? Math.floor(Date.now() / 1000),
-        });
-        if (results.length >= 20) break;
+    const data = await new Promise<string>((resolve, reject) => {
+      const req = https.get(FINNHUB_NEWS_URL, (res) => {
+        let d = "";
+        res.on("data", (c: string) => d += c);
+        res.on("end", () => resolve(d));
+      });
+      req.on("error", reject);
+      req.setTimeout(8000, () => { req.destroy(); resolve(""); });
+    });
+    if (data) {
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) {
+        for (const item of parsed as FinnhubItem[]) {
+          const headline = item.headline?.trim() ?? "";
+          if (!headline || seen.has(headline)) continue;
+          seen.add(headline);
+          results.push({
+            headline,
+            summary: (item.summary ?? "").trim(),
+            datetime: item.datetime ?? Math.floor(Date.now() / 1000),
+          });
+          if (results.length >= 30) break;
+        }
+        console.log(`[DISCOVERY] Finnhub: ${parsed.length} headlines, ${results.length} kept`);
       }
-      if (results.length >= 20) break;
     }
-
-    console.log(`[DISCOVERY] Fetched ${results.length} headlines via Yahoo Finance`);
-    return results;
   } catch (err) {
-    console.warn(`[DISCOVERY] Yahoo Finance news fetch failed: ${(err as Error).message}`);
-    return [];
+    console.warn(`[DISCOVERY] Finnhub fetch failed: ${(err as Error).message}`);
   }
+
+  // ── Source 2: Yahoo Finance (complementary, no API key) ─────────────
+  if (results.length < 30) {
+    try {
+      const yf = await getYahooFinance();
+      const queries = ["stock market", "markets today", "tech stocks"];
+      for (const query of queries) {
+        if (results.length >= 30) break;
+        const res = await yf.search(query, { newsCount: 10 });
+        const newsItems: YahooNewsItem[] = (res as any).news ?? [];
+        for (const item of newsItems) {
+          if (results.length >= 30) break;
+          const headline = item.title?.trim() ?? "";
+          if (!headline || seen.has(headline)) continue;
+          seen.add(headline);
+          results.push({
+            headline,
+            summary: item.summary?.trim() ?? "",
+            datetime: item.providerPublishTime ?? Math.floor(Date.now() / 1000),
+          });
+        }
+      }
+      console.log(`[DISCOVERY] Yahoo: ${results.length} total headlines (across all queries)`);
+    } catch (err) {
+      console.warn(`[DISCOVERY] Yahoo Finance news fetch failed: ${(err as Error).message}`);
+    }
+  }
+
+  console.log(`[DISCOVERY] Total: ${results.length} unique headlines (Finnhub + Yahoo)`);
+  return results;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
