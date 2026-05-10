@@ -383,7 +383,7 @@ export function generateEntrySignals(
           price, entryPrice: price, targetPrice: entryTarget, stopLoss,
           riskReward, potentialProfitDollar: profitDollar,
           vs50dPct: vs50d, vs200dPct: vs200d, pctOf52wHi: pctOf52w, rsi,
-          confidenceScore: Math.min(82, 45 + (45 - rsi) * 2),
+          confidenceScore: Math.min(85, 60 + (42 - rsi) * 2),
           confidence: rsi <= 40 ? "high" : "medium",
         });
       }

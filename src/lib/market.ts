@@ -96,30 +96,24 @@ const RSI_OVERBOUGHT = 68; // More conservative than 70 — takes profit sooner 
  * - RSI 50-70 → neutral/bullish regime
  */
 function computeRSI(prices: number[]): number {
-  if (prices.length < RSI_PERIOD + 1) {
-    // Not enough data — return neutral 50
-    return 50;
+  if (prices.length < RSI_PERIOD + 1) return 50;
+  let avgGain = 0, avgLoss = 0;
+  for (let i = 1; i <= RSI_PERIOD; i++) {
+    const d = prices[i] - prices[i - 1];
+    avgGain += d > 0 ? d : 0;
+    avgLoss += d < 0 ? Math.abs(d) : 0;
   }
-
-  // Use the most recent RSI_PERIOD closes for calculation
-  const period = prices.slice(-(RSI_PERIOD + 1));
-  let avgGain = 0;
-  let avgLoss = 0;
-
-  for (let i = 1; i < period.length; i++) {
-    const change = period[i] - period[i - 1];
-    if (change > 0) avgGain += change;
-    else avgLoss += Math.abs(change);
-  }
-
   avgGain /= RSI_PERIOD;
   avgLoss /= RSI_PERIOD;
-
-  if (avgLoss === 0) return 100; // No losses — infinitely strong
+  for (let i = RSI_PERIOD; i < prices.length - 1; i++) {
+    const gain = prices[i + 1] - prices[i];
+    avgGain = (avgGain * 13 + (gain > 0 ? gain : 0)) / RSI_PERIOD;
+    avgLoss = (avgLoss * 13 + (gain < 0 ? Math.abs(gain) : 0)) / RSI_PERIOD;
+  }
+  if (avgLoss === 0) return 100;
   const rs = avgGain / avgLoss;
-  return Math.round((100 - 100 / (1 + rs)) * 100) / 100;  // round to 2dp
+  return Math.round((100 - 100 / (1 + rs)) * 100) / 100;
 }
-
 async function fetchWithRetry(ticker: string, attempt = 1): Promise<MarketData | null> {
   try {
     const mod = await import("yahoo-finance2");

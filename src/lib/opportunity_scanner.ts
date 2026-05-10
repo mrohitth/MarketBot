@@ -366,9 +366,10 @@ export async function scanForOpportunities(): Promise<Opportunity[]> {
   const entrySignals = generateEntrySignals(watchlistQuotes, portfolioTickerSet);
 
   for (const sig of entrySignals) {
-    // Show critical/high always. Also show medium severity for deep-pullback signals
-    // (sector rotation ETFs like XLE/XLV/VHT at RSI 38-45 are actionable even at medium confidence)
+    // Only show signals with confidenceScore >= 60
+    // deep-pullback signals need at least 60 confidence to pass the bar
     if (sig.severity === "medium" && sig.type !== "deep-pullback") continue;
+    if (sig.type === "deep-pullback" && (sig.confidenceScore ?? 0) < 60) continue;
     // Skip tickers already handled as PEAK_ZONE this scan to avoid duplicate alerts
     if (seenThisScan.has(sig.ticker)) continue;
     seenThisScan.add(sig.ticker);
