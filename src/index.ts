@@ -86,7 +86,6 @@ import { scanMomentumBreakouts, formatMomentumAlerts } from "./lib/momentum_scan
 
 const GMAIL_USER = process.env.GMAIL_USER || "";
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD || "";
-const CSV_PATH = process.env.DISCOVER_CSV_PATH || path.join(__dirname, "../data/discover-transactions.csv");
 const MONTHLY_NET_INCOME = parseInt(process.env.MONTHLY_NET_INCOME || "5917");
 
 const BUDGET_LIMITS: BudgetLimits = {
@@ -151,8 +150,7 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
     transactions = getMockTransactions();
     budgetPacing = calculateBudgetPacing(transactions, BUDGET_LIMITS, MONTHLY_NET_INCOME);
   } else {
-    // Gmail-only — all Discover email alerts included (pending Uber pre-auths are real
-    // charges that will be deduplicated when their confirmed version arrives)
+    // Gmail-only — all Discover email alerts included
     transactions = gmailTransactions.map((g) => gmailToTransaction(g));
     budgetPacing = calculateBudgetPacing(transactions, BUDGET_LIMITS, MONTHLY_NET_INCOME);
     console.log(`[BUDGET] ${transactions.length} Gmail transaction(s)`);

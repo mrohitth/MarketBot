@@ -243,7 +243,7 @@ export function generateMomentumAlerts(
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export interface EntrySignal {
-  type: "buy-the-dip" | "sell-the-rip" | "breakout-pullback" | "gap-fill-long" | "ma-reclaim" | "extended-no-entry";
+  type: "buy-the-dip" | "sell-the-rip" | "breakout-pullback" | "gap-fill-long" | "ma-reclaim" | "extended-no-entry" | "deep-pullback";
   severity: "critical" | "high" | "medium";
   ticker: string;
   sector: string;
@@ -354,6 +354,37 @@ export function generateEntrySignals(
           vs50dPct: vs50d, vs200dPct: vs200d, pctOf52wHi: pctOf52w, rsi,
           confidenceScore: Math.min(85, 50 + (RSI_OVERSOLD_MAX - rsi) * 2),
           confidence: rsi <= 32 ? "high" : "medium",
+        });
+      }
+    }
+
+    // ── BUY SIGNAL 1B: Deep Pullback in Oversold Sector ────────────────
+    // RSI 38-45 AND price just below MA50 — sector ETFs bouncing from real pullbacks
+    // XLE/XLV/VHT case: RSI ~40, price -3% below MA50 → accumulate toward MA50 reclaim
+    if (
+      rsi >= 38 && rsi <= 55 &&
+      ma50 && price > ma50 * 0.93 && price < ma50
+    ) {
+      const entryTarget = ma50; // target: reclaim 50d MA
+      const stopLoss    = ma50 * 0.94;
+      const riskReward  = (entryTarget - price) / (price - stopLoss);
+      const profitDollar = (entryTarget - price) * 50;
+
+      if (riskReward >= 1.0 && profitDollar >= 100) {
+        signals.push({
+          type: "deep-pullback",
+          severity: rsi <= 40 ? "high" : "medium",
+          ticker, sector,
+          message: `🟢 ${ticker} — DEEP PULLOBACK`,
+          action: `BUY — Target $${entryTarget.toFixed(2)} (reclaim MA50)`,
+          rationale: `RSI at ${rsi.toFixed(0)} — ${ticker} pulled back to ${Math.abs(vs50d).toFixed(1)}% below its 50d MA ($${ma50.toFixed(2)}). Sector rotation play: RSI oversold with price testing support. Target is $${entryTarget.toFixed(2)} (reclaim 50d MA). Stop below at $${stopLoss.toFixed(2)}.`,
+          riskNote: `Stop at $${stopLoss.toFixed(2)} (${((price - stopLoss) / price * 100).toFixed(1)}% risk). Sector ETF pullback — mean-reversion entry.`,
+          details: `$${price.toFixed(2)} | RSI ${rsi.toFixed(0)} | 50d MA $${ma50.toFixed(2)} (${vs50d.toFixed(1)}%) | Target $${entryTarget.toFixed(2)} | R/R ${riskReward.toFixed(1)}:1 | ~$${profitDollar.toFixed(0)} profit | Sector: ${sector}`,
+          price, entryPrice: price, targetPrice: entryTarget, stopLoss,
+          riskReward, potentialProfitDollar: profitDollar,
+          vs50dPct: vs50d, vs200dPct: vs200d, pctOf52wHi: pctOf52w, rsi,
+          confidenceScore: Math.min(82, 45 + (45 - rsi) * 2),
+          confidence: rsi <= 40 ? "high" : "medium",
         });
       }
     }
@@ -480,18 +511,19 @@ export function generateEntrySignals(
 
 export const DRIFT_THRESHOLDS_ADVISORY: Record<string, number> = {
   // Broad indices — tight bands, high conviction core holdings
-  VTI:  5, // ±5% drift — must be close to 20% weight
-  VOO:  5, // ±5% drift
-  QQQ:  5, // ±5% drift
-  // Thematic/sector — medium bands
-  NVDA: 4, // ±4% drift — high conviction but GPU market is volatile
-  SMH:  6, // ±6% drift — semi ETF, sector-specific risk
-  SCHG: 6, // ±6% drift — growth ETF, less core
-  VXUS: 7, // ±7% drift — international, wider band acceptable
-  SCHD: 6, // ±6% drift — dividend ETF, less volatile
-  SPYD: 8, // ±8% drift — tactical income position, wider
-  ASTS: 15,// ±15% drift — speculative, accept high volatility
-  SPAXX: 0,// Cash — no drift concept
+  NVDA:  35, // ±4% drift — GPU moat, maximum conviction AI infrastructure bet
+  VTI:   15, // ±5% drift — broad US market, secondary anchor
+  VOO:   10, // ±5% drift — S&P500 core, large-cap ballast
+  QQQ:    8, // ±5% drift — tech/growth tilt (trim when overweight)
+  SMH:   10, // ±6% drift — semi sector ETF
+  SCHG:   8, // ±6% drift — large-cap growth (weekly $150 auto-invest)
+  XLE:    5, // ±5% drift — energy satellite position (RSI-driven)
+  XLV:    5, // ±5% drift — healthcare satellite position (RSI-driven)
+  VXUS:   5, // ±7% drift — international diversification
+  SCHD:   4, // ±6% drift — dividend stability
+  SPYD:    2, // ±8% drift — tactical income (was 1%)
+  ASTS:   15,// ±15% drift — speculative moonshot
+  SPAXX:   0,// Cash — no drift concept
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -504,17 +536,19 @@ export const DRIFT_THRESHOLDS_ADVISORY: Record<string, number> = {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export const PORTFOLIO_TARGET_ALLOCATION: Record<string, number> = {
-  VTI:   0.20, // 20% — broad US market exposure
-  NVDA:  0.19, // 19% — largest conviction, AI chip moat
-  VOO:   0.17, // 17% — S&P500 core
-  QQQ:   0.14, // 14% — tech/growth tilt
+  NVDA:  0.35, // 35% — maximum conviction AI infrastructure bet
+  VTI:   0.15, // 15% — broad US market secondary anchor
+  VOO:   0.10, // 10% — S&P500 large-cap ballast
+  QQQ:   0.08, // 8% — tech/growth tilt
   SMH:   0.10, // 10% — semi sector ETF (high conviction)
   SCHG:  0.08, // 8% — large-cap growth (weekly $150 auto-invest)
-  VXUS:  0.05, // 5% — international diversification
+  XLE:   0.05, // 5% — energy satellite (sector rotation, RSI-driven)
+  XLV:   0.05, // 5% — healthcare satellite (sector rotation, RSI-driven)
+  VXUS:  0.04, // 4% — international diversification
   SCHD:  0.04, // 4% — dividend stability
   SPYD:  0.01, // 1% — tactical income
   ASTS:  0.01, // 1% — speculative moonshot
-  SPAXX: 0.01, // 1% — cash buffer
+  SPAXX: 0.04, // 4% — cash buffer
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════

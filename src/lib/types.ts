@@ -196,7 +196,7 @@ export const PORTFOLIO_TICKERS = ["VTI", "NVDA", "VOO", "QQQ", "SMH", "SCHG", "V
 export const MACRO_TICKERS = ["SPY", "QQQ", "DXY", "TLT", "GLD"] as const;
 
 /**
- * WATCHLIST_TICKERS — 38 stocks across 9 sectors for entry/exit scanning.
+ * WATCHLIST_TICKERS — 42 stocks across 9 sectors for entry/exit scanning.
  * Philosophy: scan a wide field so we catch every dip worth buying and every peak worth selling.
  * - Each sector: 2-9 tickers — enough to find the BEST entry, not just ANY entry
  * - Only actionable tickers: RSI oversold bounces, breakout pullsback to MA, gap fills
@@ -232,6 +232,8 @@ export const WATCHLIST_TICKERS = [
   "GLD", "SLV",
   // Semi-adjacent — 1 ticker
   "NXPI",
+  // Portfolio satellite ETFs — sector rotation plays (XLE/XLV already held, VHT/XLB for sector entry)
+  "XLE", "XLV", "VHT", "XLB",
 ] as const;
 
 export const SECTOR_TICKERS = [

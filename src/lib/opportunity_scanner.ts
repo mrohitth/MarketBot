@@ -366,8 +366,9 @@ export async function scanForOpportunities(): Promise<Opportunity[]> {
   const entrySignals = generateEntrySignals(watchlistQuotes, portfolioTickerSet);
 
   for (const sig of entrySignals) {
-    // Only show critical/high — medium watchlist signals are informational only
-    if (sig.severity === "medium") continue;
+    // Show critical/high always. Also show medium severity for deep-pullback signals
+    // (sector rotation ETFs like XLE/XLV/VHT at RSI 38-45 are actionable even at medium confidence)
+    if (sig.severity === "medium" && sig.type !== "deep-pullback") continue;
     // Skip tickers already handled as PEAK_ZONE this scan to avoid duplicate alerts
     if (seenThisScan.has(sig.ticker)) continue;
     seenThisScan.add(sig.ticker);
@@ -424,7 +425,7 @@ export function formatOpportunityAlert(opps: Opportunity[]): string {
   });
 
   let output = `🚨 *MARKET ALERT* — ${timestamp}\n`;
-  output += `_38-ticker watchlist | Advisor-grade hybrid scanner_\n\n`;
+  output += `_42-ticker watchlist | Advisor-grade hybrid scanner_\n\n`;
 
   // Section 1: BUY THE DIP
   if (buys.length > 0) {
