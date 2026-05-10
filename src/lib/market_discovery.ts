@@ -596,6 +596,46 @@ export async function runDiscovery(skipVolumeScreen = false): Promise<DiscoveryR
  * Get a human-readable summary of the current discovery queue for the scanner output.
  * Only shows "new" status entries. Sorted by: momentum-runner > volume-surge > tag-along.
  */
+/** Compute a discovery confidence score 0-100 */
+function computeDiscoveryConfidence(entry: DiscoveryEntry): number {
+  let score = 50;
+  if (entry.source === "volume-surge") {
+    const volRatio = entry.volumeAvg > 0 ? entry.volume / entry.volumeAvg : 0;
+    score += Math.min(20, volRatio * 5);
+    if (entry.rsi <= 42) score += 12;
+    else if (entry.rsi >= 68) score -= 8;
+  }
+  if (entry.source === "momentum-runner") {
+    if (entry.catalyst?.startsWith("Up")) {
+      if (entry.rsi < 42) score += 5;
+      else if (entry.rsi < 60) score += 12;
+      else score += 5;
+    } else {
+      if (entry.rsi < 42) score += 15;
+      else score += 5;
+    }
+  }
+  if (entry.source === "tag-along") {
+    if (entry.vs50dPct < -5) score += 14;
+    else if (entry.vs50dPct > 25) score -= 10;
+    if (entry.rsi <= 42) score += 10;
+    else if (entry.rsi >= 68) score -= 8;
+  }
+  if (entry.rsi <= 35) score += 8;
+  if (entry.pctOf52wHi < 50) score += 5;
+  if (entry.pctOf52wHi > 95) score -= 5;
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+function confidenceBar(score: number): string {
+  const n = Math.min(100, Math.max(0, score));
+  const filled = Math.round(n / 10);
+  const bar = "█".repeat(filled) + "░".repeat(10 - filled);
+  return `[${bar}] ${Math.round(n)}/100`;
+}
+/**
+ * Get a human-readable summary of the current discovery queue for the scanner output.
+ * Only shows "new" status entries. Sorted by: momentum-runner > volume-surge > tag-along.
+ */
 export function formatDiscoverySummary(): string {
   const queue = loadQueue();
   const newEntries = queue.entries.filter(e => e.status === "new")
@@ -610,26 +650,40 @@ export function formatDiscoverySummary(): string {
     month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
   });
 
-  let output = `\n🔍 *MARKET DISCOVERY* — ${timestamp}\n`;
-  output += `_News tag-along + volume/momentum screen | Warm Bench queue_\n\n`;
+  let output = `
+🔍 *MARKET DISCOVERY* — ${timestamp}
+`;
+  output += `_News tag-along + volume/momentum screen | Warm Bench queue_
+
+`;
 
   for (const entry of newEntries.slice(0, 8)) {
     const icon = entry.source === "volume-surge" ? "📊" :
                  entry.source === "momentum-runner" ? "🚀" : "🔗";
     const dir = entry.vs50dPct > 20 ? "Extended" : entry.vs50dPct < -10 ? "Dip" : "Neutral";
     const rsiNote = entry.rsi <= 42 ? " Oversold" : entry.rsi >= 68 ? " Overbought" : "";
-    output += `${icon} *${entry.ticker}* — ${dir} ($${entry.price.toFixed(2)})${rsiNote}\n`;
-    output += `   RSI: ${entry.rsi.toFixed(0)} | vs 52w: ${entry.pctOf52wHi.toFixed(0)}% | vs MA50: ${entry.vs50dPct >= 0 ? "+" : ""}${entry.vs50dPct.toFixed(1)}%\n`;
-    if (entry.catalyst) output += `   📰 ${entry.catalyst}\n`;
-    if (entry.headlinePreview) output += `   “${entry.headlinePreview.slice(0, 100)}”\n`;
-    output += `\n`;
+    const conf = computeDiscoveryConfidence(entry);
+    const bar = confidenceBar(conf);
+    output += `${icon} *${entry.ticker}* — ${dir} ($${entry.price.toFixed(2)})${rsiNote}   ${bar}
+`;
+    output += `   RSI: ${entry.rsi.toFixed(0)} | vs 52w: ${entry.pctOf52wHi.toFixed(0)}% | vs MA50: ${entry.vs50dPct >= 0 ? "+" : ""}${entry.vs50dPct.toFixed(1)}%
+`;
+    if (entry.catalyst) output += `   📰 ${entry.catalyst}
+`;
+    if (entry.headlinePreview) output += `   “${entry.headlinePreview.slice(0, 100)}”
+`;
+    output += `
+`;
   }
 
   if (newEntries.length > 8) {
-    output += `_+${newEntries.length - 8} more in queue_ — check data/discovery-queue.json\n\n`;
+    output += `_+${newEntries.length - 8} more in queue_ — check data/discovery-queue.json
+
+`;
   }
 
-  output += `_Reply DISCOVER /ticker to promote, DISMISS /ticker to remove._\n`;
+  output += `_Reply DISCOVER /ticker to promote, DISMISS /ticker to remove._
+`;
   return output;
 }
 
