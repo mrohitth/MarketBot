@@ -32,4 +32,4 @@ coverage/
 
 # Temporary files
 tmp/
-temp/
+temp/data/*.txt
