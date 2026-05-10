@@ -640,7 +640,7 @@ export function formatDiscoverySummary(): string {
   const queue = loadQueue();
   const newEntries = queue.entries.filter(e => e.status === "new")
     .sort((a, b) => {
-      const order = { "momentum-runner": 0, "volume-surge": 1, "tag-along": 2 };
+      const order = { "tag-along": 0, "volume-surge": 1, "momentum-runner": 2 };
       return (order[a.source] ?? 9) - (order[b.source] ?? 9);
     });
 
