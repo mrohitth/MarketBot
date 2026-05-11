@@ -223,9 +223,16 @@ export async function scanForOpportunities(): Promise<Opportunity[]> {
 
   // Suppressed ticker definitions — owned positions, silence repeat alerts
   type SuppressedEntry = { stop: number; target: number; ma50?: number };
+  // Owned positions — suppress black-swan scanner alerts while held
+  // CVX/COIN: suppress only in a tight band around entry to avoid spurious alerts
+  // VXUS/SCHD: recently trimmed — suppress until price deviates significantly from trim price
   const SUPPRESSED: Record<string, SuppressedEntry> = {
     AMGN: { stop: 315.54, target: 353.55 },
     SMH:  { stop: 0,      target: 0,      ma50: 431.47 },
+    CVX:  { stop: 175.00, target: 200.00 },   // entry ~$184.50 — suppress in range
+    COIN: { stop: 185.00, target: 240.00 },   // entry ~$208.50 — suppress in range
+    VXUS: { stop: 80.00,  target: 90.00  },   // trimmed at ~$85.50
+    SCHD: { stop: 30.00,  target: 33.50  },   // trimmed at ~$31.70
   };
   function isSuppressed(opp: Opportunity): boolean {
     const s = SUPPRESSED[opp.ticker];
@@ -239,7 +246,9 @@ export async function scanForOpportunities(): Promise<Opportunity[]> {
       if (!ma50) return false;
       return (fullQuoteMap.get("SMH")!.price / ma50 - 1) * 100 > 3;
     }
-    return false;
+    // CVX/COIN/VXUS/SCHD: suppress if price is within entry band
+    const p = fullQuoteMap.get(opp.ticker)?.price ?? 0;
+    return p > s.stop && p < s.target;
   }
 
   const marketContext = assessMarketContext(portfolioQuotes, sectorQuotes);
@@ -303,6 +312,9 @@ export async function scanForOpportunities(): Promise<Opportunity[]> {
   for (const setup of setups) {
     if (setup.confidence !== "high") continue;
     if (setup.potentialProfitDollar < 1500) continue;
+    // Skip tickers already held in portfolio (no new BUY setups on owned positions)
+    const heldSet = new Set(positions.map(p => p.ticker));
+    if (heldSet.has(setup.ticker)) continue;
     opportunities.push({
       type: "setup",
       severity: "high",

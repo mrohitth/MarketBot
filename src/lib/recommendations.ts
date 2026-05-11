@@ -530,8 +530,8 @@ export const DRIFT_THRESHOLDS_ADVISORY: Record<string, number> = {
   SCHG:   8, // ±6% drift — large-cap growth (weekly $150 auto-invest)
   XLE:    5, // ±5% drift — energy satellite position (RSI-driven)
   XLV:    5, // ±5% drift — healthcare satellite position (RSI-driven)
-  VXUS:   5, // ±7% drift — international diversification
-  SCHD:   4, // ±6% drift — dividend stability
+  VXUS:  25, // ±25% drift — only extreme deviations trigger rebalance
+  SCHD:  25, // ±25% drift — only extreme deviations trigger rebalance
   SPYD:    2, // ±8% drift — tactical income (was 1%)
   ASTS:   15,// ±15% drift — speculative moonshot
   SPAXX:   0,// Cash — no drift concept
@@ -554,8 +554,8 @@ export const PORTFOLIO_TARGET_ALLOCATION: Record<string, number> = {
   SMH:   0.10, // 10% — semi sector (high conviction)
   XLE:   0.07, // 7% — energy diversification (protected from drift sells)
   XLV:   0.06, // 6% — healthcare diversification (protected from drift sells)
-  VXUS:  0.04, // 4% — international diversification
-  SCHD:  0.04, // 4% — dividend stability
+  VXUS:  0.0291, // 2.9% — international (sold down) diversification
+  SCHD:  0.0294, // 2.9% — dividend (sold down) stability
   SPYD:  0.01, // 1% — tactical income
   ASTS:  0.00, // 0% — moonhot/momentum trade, NOT drift-managed
   SPAXX: 0.04, // 4% — cash buffer
