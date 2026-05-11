@@ -3,6 +3,7 @@ import {
   PORTFOLIO_TARGET_ALLOCATION,
   DRIFT_THRESHOLDS_ADVISORY,
   BLACK_SWAN_THRESHOLD_PCT,
+  CORE_TICKERS,
   generateTradeSetups,
   rankSetups,
   OpenPosition,
@@ -271,7 +272,8 @@ export function generateRebalanceRecommendations(positions: Position[]): TradeRe
       const portfolioValue = positions.reduce((sum, p) => sum + p.marketValue, 0);
       const overweightDollars = (pos.drift / 100) * portfolioValue;
       const rawSharesToMove = Math.abs(overweightDollars) / pos.currentPrice;
-      // Bounds-check: can't sell more than held
+      // Skip SELL for core tickers — managed via Core Accumulation (RSI context), not drift
+      if (action === "SELL" && CORE_TICKERS.has(pos.ticker)) continue;
       if (action === "SELL") {
         if (pos.shares === 0 || rawSharesToMove === 0) continue;
         const sharesToMove = Math.min(Math.floor(rawSharesToMove), pos.shares);
