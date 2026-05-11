@@ -228,8 +228,8 @@ export async function scanForOpportunities(): Promise<Opportunity[]> {
   // VXUS/SCHD: recently trimmed — suppress until price deviates significantly from trim price
   const SUPPRESSED: Record<string, SuppressedEntry> = {
     AMGN: { stop: 315.54, target: 353.55 },
-    SMH:  { stop: 0,      target: 0,      ma50: 431.47 },
-    CVX:  { stop: 175.00, target: 200.00 },   // entry ~$184.50 — suppress in range
+    SMH:  { stop: 541.00, target: 0, ma50: 431.47 },
+    CVX:  { stop: 175.00, target: 200.00 },   // entry ~$184.50 — suppress normal range; alert below (BUY) or above (SELL)
     COIN: { stop: 185.00, target: 240.00 },   // entry ~$208.50 — suppress in range
     VXUS: { stop: 80.00,  target: 90.00  },   // trimmed at ~$85.50
     SCHD: { stop: 30.00,  target: 33.50  },   // trimmed at ~$31.70
@@ -464,12 +464,33 @@ export function formatOpportunityAlert(opps: Opportunity[]): string {
     output += `📈 *BUY THE DIP* (${buys.length} signal${buys.length > 1 ? "s" : ""})\n`;
     for (const opp of buys) {
       const conf = opp.severity === "critical" ? "🚨" : "🟡";
+      // Extract share count from details (format: "$12345 position (N shares)")
+      const details = opp.details ?? "";
+      const sharesMatch = details.match(/\((\d+\.?\d*)\s+shares?\)/);
+      const shares = sharesMatch ? parseFloat(sharesMatch[1]) : null;
+
+      // Compute suggested buy shares: 5% of portfolio / price drop from day low
+      let shareGuidance = "";
+      if (shares && (opp.confidenceScore ?? 0) >= 60) {
+        const portfolioVal: number = 52000; // approximate for guidance
+        const buyBudget = portfolioVal * 0.05; // 5% of portfolio per dip
+        const priceMatch = (opp.rationale ?? '').match(/\$([\d.]+)/);
+        const currentPrice = priceMatch ? parseFloat(priceMatch[1]) : null;
+        if (currentPrice) {
+          const pctDropMatch = (opp.message ?? '').match(/DOWN\s+([\d.]+)%/);
+          const pctDrop = pctDropMatch ? parseFloat(pctDropMatch[1]) : 5;
+          const impliedEntryPrice = currentPrice * (1 + pctDrop / 100);
+          const sharesToBuy = Math.floor(buyBudget / impliedEntryPrice);
+          shareGuidance = `   💡 Suggested: +${sharesToBuy} shares (~$ ${Math.round(buyBudget).toLocaleString()} budget)`;
+        }
+      }
+
       output += `${conf} *${opp.ticker}* — ${opp.action}`;
       output += `   ${confidenceBar(opp.confidenceScore ?? 50)}
 `;
       output += `   ${opp.rationale}\n`;
       output += `   ⚠️ ${opp.riskNote}\n`;
-      output += `   📊 ${opp.details}\n\n`;
+      output += `   📊 ${opp.details}${shareGuidance}\n\n`;
     }
   }
 
@@ -478,12 +499,29 @@ export function formatOpportunityAlert(opps: Opportunity[]): string {
     output += `✂️ *TRIM THE RIP* (${sells.length} signal${sells.length > 1 ? "s" : ""})\n`;
     for (const opp of sells) {
       const conf = opp.severity === "critical" ? "🚨" : "🟡";
+      // Extract current shares and compute trim amount
+      const details = opp.details ?? "";
+      const sharesMatch = details.match(/\((\d+\.?\d*)\s+shares?\)/);
+      const shares = sharesMatch ? parseFloat(sharesMatch[1]) : null;
+      const priceMatch = (details ?? '').match(/\$([\d.]+)\s+position/);
+      const price = priceMatch ? parseFloat(priceMatch[1]) : null;
+
+      let trimGuidance = "";
+      if (shares && price) {
+        const portfolioVal = 52000;
+        const trimPct: number = 0.05; // trim 5% of position
+        const trimBudget = portfolioVal * trimPct;
+        const sharesToTrim = Math.max(1, Math.floor(trimBudget / price));
+        const actualTrim = Math.min(sharesToTrim, shares);
+        trimGuidance = `   💡 Suggested: -${actualTrim} shares (~$ ${Math.round(actualTrim * price).toLocaleString()})`;
+      }
+
       output += `${conf} *${opp.ticker}* — ${opp.action}`;
       output += `   ${confidenceBar(opp.confidenceScore ?? 50)}
 `;
       output += `   ${opp.rationale}\n`;
       output += `   ⚠️ ${opp.riskNote}\n`;
-      output += `   📊 ${opp.details}\n\n`;
+      output += `   📊 ${opp.details}${trimGuidance}\n\n`;
     }
   }
 
