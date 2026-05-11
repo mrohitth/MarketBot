@@ -2,7 +2,8 @@ import {
   MorningBrief, 
   BriefSection, 
   BudgetPacingReport, 
-  MarketData, 
+  MarketData,
+  computeFeeDrag, 
   Position, 
   TradeRecommendation, 
   ProfitMaximizerIdea 
@@ -105,6 +106,11 @@ export function formatBriefAsTelegram(brief: MorningBrief): string {
   // 4. Portfolio Status
   output += formatPositionsForBrief(brief.portfolioPositions);
   output += `\n`;
+
+  // 4b. Cost of Carry — expense ratio fees
+  output += formatCostOfCarry(brief.portfolioPositions);
+  output += `
+`;
 
   // 5. Trade Recommendations (if any)
   if (brief.recommendations.length > 0) {
@@ -246,4 +252,45 @@ export function hasHighPriorityItems(brief: MorningBrief): boolean {
  */
 export function extractActionItems(brief: MorningBrief): string[] {
   return brief.scheduledActions.map((a) => a.description);
+}
+
+/**
+ * Format Cost of Carry section — annual fee drag from expense ratios.
+ * Flags positions with ER > 0.20% with contextual note (not rejection).
+ * SMH at 0.35% is fine if semi thesis is delivering — flag for awareness.
+ */
+export function formatCostOfCarry(positions: any[]): string {
+  const withFees = positions
+    .map(p => ({ ...p, ...computeFeeDrag(p.marketValue, p.ticker) }))
+    .filter(p => p.er > 0 && p.annualFee > 0);
+
+  if (withFees.length === 0) return "";
+
+  const totalAnnualFee = withFees.reduce((sum, p) => sum + p.annualFee, 0);
+  const totalValue = withFees.reduce((sum, p) => sum + p.marketValue, 0);
+  const flagged = withFees.filter(p => p.flagged);
+
+  let output = `💸 *COST OF CARRY* — Annual fee drag
+`;
+
+  for (const p of withFees) {
+    const erPct = (p.er * 100).toFixed(2);
+    const flag = p.flagged ? " ⚠️" : "";
+    output += `   ${p.ticker}: $${p.annualFee.toFixed(2)}/yr (${erPct}% ER)${flag}
+`;
+  }
+
+  output += `   ─────────────────
+`;
+  output += `   Total: $${totalAnnualFee.toFixed(2)}/yr on $${totalValue.toLocaleString()}
+`;
+  output += `   Effective: ${((totalAnnualFee / totalValue) * 100).toFixed(2)}%
+`;
+
+  if (flagged.length > 0) {
+    output += `   ⚠️ ${flagged.map(p => p.ticker).join(", ")} > 0.20% ER — review vs performance
+`;
+  }
+
+  return output;
 }

@@ -244,3 +244,49 @@ export const SECTOR_TICKERS = [
 ] as const;
 
 export const TICKERS = [...PORTFOLIO_TICKERS] as string[];
+
+/**
+ * EXPENSE RATIOS — annual fee as decimal percentage for each ETF/fund.
+ * Only applies to ETFs. Individual stocks (NVDA, AMGN, ASTS) = 0.
+ * Thresholds: <0.10% = cheap, 0.10-0.20% = acceptable, >0.20% = flag for review.
+ * Context matters: SMH at 0.35% is worth it if semi thesis delivers alpha.
+ */
+export const EXPENSE_RATIOS: Record<string, number> = {
+  // Portfolio ETFs
+  "VTI": 0.0003,   // Vanguard Total Stock Market
+  "VOO": 0.0003,   // Vanguard S&P 500
+  "QQQ": 0.0020,   // Invesco QQQ
+  "SCHG": 0.0004,  // Schwab US Large-Cap Growth
+  "SMH": 0.0035,   // VanEck Semiconductor
+  "XLE": 0.0009,   // Energy Select Sector SPDR
+  "XLV": 0.0009,   // Health Care Select Sector SPDR
+  "VXUS": 0.0004,  // Vanguard Total International Stock
+  "SCHD": 0.0006,  // Schwab US Dividend Equity
+  "SPYD": 0.0007,  // SPDR Portfolio High Yield
+  "SPAXX": 0.0042, // Fidelity Government Money Market (7-day yield, not ER — approximates as opportunity cost)
+  // Macro ETFs
+  "SPY": 0.000945, // SPDR S&P 500
+  "TLT": 0.0015,   // iShares 20+ Year Treasury
+  "GLD": 0.0040,   // SPDR Gold
+  // Sector scan ETFs
+  "SOXX": 0.0035,  // iShares Semiconductor
+  "XLI": 0.0009,   // Industrial Select Sector
+  "XLB": 0.0009,   // Materials Select Sector
+  "VHT": 0.0009,   // Vanguard Health Care
+  "VBR": 0.0007,   // Vanguard Small-Cap Value
+  "AVUV": 0.0025,  // Avantis US Small Cap Value
+};
+
+/** Max acceptable ER before flagging (0.20%) */
+export const ER_FLAG_THRESHOLD = 0.0020;
+
+/** Compute annual fee drag in dollars for a given position */
+export function computeFeeDrag(marketValue: number, ticker: string): { annualFee: number; er: number; flagged: boolean } {
+  const er = EXPENSE_RATIOS[ticker] ?? 0;
+  const annualFee = marketValue * er;
+  return {
+    annualFee: Math.round(annualFee * 100) / 100,
+    er,
+    flagged: er > ER_FLAG_THRESHOLD && er > 0,
+  };
+}

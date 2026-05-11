@@ -1,4 +1,4 @@
-import { MarketData, Position, TradeRecommendation, TICKERS, MACRO_TICKERS, SECTOR_TICKERS, WATCHLIST_TICKERS } from "./types";
+import { MarketData, Position, TradeRecommendation, TICKERS, MACRO_TICKERS, SECTOR_TICKERS, WATCHLIST_TICKERS, EXPENSE_RATIOS, ER_FLAG_THRESHOLD } from "./types";
 import {
   PORTFOLIO_TARGET_ALLOCATION,
   DRIFT_THRESHOLDS_ADVISORY,
@@ -315,7 +315,10 @@ export function formatPositionsForBrief(positions: Position[]): string {
   for (const pos of positions) {
     const statusEmoji = pos.status === "black-swan" ? "⚠️" : pos.status === "drifted" ? "🔄" : "✅";
     const driftSign = pos.drift > 0 ? "+" : "";
-    output += `${statusEmoji} ${pos.ticker}: $${pos.marketValue.toFixed(0)} (${pos.weight.toFixed(1)}%) 📉 ${driftSign}${pos.drift.toFixed(1)}% | $${pos.currentPrice.toFixed(2)}\n`;
+    const er = EXPENSE_RATIOS[pos.ticker] ?? 0;
+    const erStr = er > 0 ? ` ER ${(er * 100).toFixed(2)}%` : "";
+    const erFlag = er > ER_FLAG_THRESHOLD ? " ⚠️" : "";
+    output += `${statusEmoji} ${pos.ticker}: $${pos.marketValue.toFixed(0)} (${pos.weight.toFixed(1)}%) 📉 ${driftSign}${pos.drift.toFixed(1)}% | $${pos.currentPrice.toFixed(2)}${erStr}${erFlag}\n`;
   }
 
   return output;
