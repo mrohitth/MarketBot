@@ -254,6 +254,7 @@ export function calculatePositions(
       targetWeight: targetWeight * 100,
       drift,
       status,
+      rsi: quote.rsi,
     });
   }
 
@@ -266,16 +267,45 @@ export function generateRebalanceRecommendations(positions: Position[]): TradeRe
   for (const pos of positions) {
     if (pos.status === "drifted") {
       const action = pos.drift > 0 ? "SELL" : "BUY";
-      const sharesToMove = Math.floor(Math.abs(pos.drift) * 0.5);
-      recommendations.push({
-        action,
-        ticker: pos.ticker,
-        shares: sharesToMove > 0 ? sharesToMove : undefined,
-        reason: `${pos.ticker} drifted ${pos.drift.toFixed(1)}% from target (${pos.targetWeight.toFixed(0)}%)`,
-        confidence: "medium",
-        requiresConfirmation: false,
-        type: "rebalance",
-      });
+      // Dollar-based share count: (overweightDollars) / price
+      const portfolioValue = positions.reduce((sum, p) => sum + p.marketValue, 0);
+      const overweightDollars = (pos.drift / 100) * portfolioValue;
+      const rawSharesToMove = Math.abs(overweightDollars) / pos.currentPrice;
+      // Bounds-check: can't sell more than held
+      if (action === "SELL") {
+        if (pos.shares === 0 || rawSharesToMove === 0) continue;
+        const sharesToMove = Math.min(Math.floor(rawSharesToMove), pos.shares);
+        if (sharesToMove === 0) continue;
+        recommendations.push({
+          action,
+          ticker: pos.ticker,
+          shares: sharesToMove,
+          dollarAmount: sharesToMove * pos.currentPrice,
+          reason: `${pos.ticker} drifted ${pos.drift > 0 ? "+" : ""}${pos.drift.toFixed(1)}% from target (${pos.targetWeight.toFixed(0)}%)`,
+          confidence: "medium",
+          requiresConfirmation: false,
+          type: "rebalance",
+        });
+      } else {
+        // BUY side: cap at position size of the reference "mirror" ticker (QQQ at 8% target)
+        // to keep recommendations grounded in realistic capital requirements
+        if (pos.shares === 0 || rawSharesToMove === 0) continue;
+        const mirrorTicker = "QQQ";
+        const mirrorPos = positions.find((p) => p.ticker === mirrorTicker);
+        const maxBuyShares = mirrorPos ? Math.floor((mirrorPos.marketValue * 0.5) / pos.currentPrice) : Math.floor(rawSharesToMove);
+        const sharesToMove = Math.min(Math.floor(rawSharesToMove), maxBuyShares);
+        if (sharesToMove === 0) continue;
+        recommendations.push({
+          action,
+          ticker: pos.ticker,
+          shares: sharesToMove,
+          dollarAmount: sharesToMove * pos.currentPrice,
+          reason: `${pos.ticker} drifted ${pos.drift > 0 ? "+" : ""}${pos.drift.toFixed(1)}% from target (${pos.targetWeight.toFixed(0)}%)`,
+          confidence: "medium",
+          requiresConfirmation: false,
+          type: "rebalance",
+        });
+      }
     }
     if (pos.status === "black-swan") {
       recommendations.push({

@@ -39,6 +39,7 @@ export interface Position {
   targetWeight: number;
   drift: number;
   status: "on-target" | "drifted" | "black-swan";
+  rsi?: number;
 }
 
 export interface MarketData {

@@ -71,14 +71,15 @@ export function composeBrief(
 }
 
 /**
- * Format complete brief as Telegram message
+ * Format complete brief as Telegram message — single-pass, no duplication.
  */
 export function formatBriefAsTelegram(brief: MorningBrief): string {
+  // ── 1. HEADER ─────────────────────────────────────────────────────────────
   let output = `🌅 *GOOD MORNING — CAPITAL PILOT BRIEF*\n`;
   output += `${brief.date} | 8:00 AM EST\n`;
   output += `${"═".repeat(30)}\n\n`;
 
-  // 1. Liquidity Snapshot
+  // ── 2. LIQUIDITY ─────────────────────────────────────────────────────────────
   output += `💵 *LIQUIDITY*\n`;
   const cashStatus = brief.liquidity.status === "surplus" ? "🟢" : "🟡";
   output += `${cashStatus} Cash: $${brief.liquidity.cashAvailable.toLocaleString()}`;
@@ -87,93 +88,86 @@ export function formatBriefAsTelegram(brief: MorningBrief): string {
   }
   output += `\n\n`;
 
-  // 2. Budget Pacing
+  // ── 3. BUDGET PACING ────────────────────────────────────────────────────────
   output += formatBudgetPacingForBrief(brief.budgetPacing);
   output += `\n\n`;
 
-  // 3. Market Summary
+  // ── 4. MARKET + RSI SNAPSHOT ──────────────────────────────────────────────────
   output += `📈 *MARKET*\n`;
-  const tickers = ["NVDA", "SMH", "SCHG"];
-  for (const ticker of tickers) {
+  const rsiTickers = ["NVDA", "QQQ", "SMH", "VOO"];
+  for (const ticker of rsiTickers) {
     const pos = brief.portfolioPositions.find((p) => p.ticker === ticker);
     if (!pos) continue;
-    
     const emoji = pos.dayChangePercent > 1 ? "🟢" : pos.dayChangePercent < -1 ? "🔴" : "🟡";
-    output += `${emoji} ${ticker}: $${pos.currentPrice.toFixed(2)} (${pos.dayChangePercent > 0 ? "+" : ""}${pos.dayChangePercent.toFixed(2)}%)\n`;
+    const signal = pos.rsi != null && pos.rsi > 80 ? "OVERBOUGHT ⚠️" : pos.rsi != null && pos.rsi > 70 ? "OVERBOUGHT" : pos.rsi != null && pos.rsi > 65 ? "ELEVATED" : pos.rsi != null && pos.rsi > 55 ? "NEUTRAL" : "MODERATE";
+    output += `${emoji} ${ticker}: $${pos.currentPrice.toFixed(2)} (${pos.dayChangePercent > 0 ? "+" : ""}${pos.dayChangePercent.toFixed(2)}%) | RSI ${pos.rsi?.toFixed(1) ?? "—"} — ${signal}\n`;
   }
   output += `\n`;
 
-  // 4. Portfolio Status
-  output += formatPositionsForBrief(brief.portfolioPositions);
+  // ── 5. PORTFOLIO ─────────────────────────────────────────────────────────────
+  output += `💼 *PORTFOLIO*\n`;
+  for (const pos of brief.portfolioPositions) {
+    const statusEmoji = pos.status === "black-swan" ? "⚠️" : pos.status === "drifted" ? "🔄" : "✅";
+    const driftSign = pos.drift > 0 ? "+" : "";
+    if (Math.abs(pos.drift) > 5) {
+      output += `${statusEmoji} ${pos.ticker}: $${pos.marketValue.toFixed(0)} (${pos.weight.toFixed(1)}%) 📉 ${driftSign}${pos.drift.toFixed(1)}% | $${pos.currentPrice.toFixed(2)}\n`;
+    } else {
+      output += `✅ ${pos.ticker}: $${pos.marketValue.toFixed(0)} (${pos.weight.toFixed(1)}%) | $${pos.currentPrice.toFixed(2)}\n`;
+    }
+  }
   output += `\n`;
 
-  // 4b. Cost of Carry — expense ratio fees
-  output += formatCostOfCarry(brief.portfolioPositions);
-  output += `
-`;
+  // ── 6. TRADE ACTIONS ─────────────────────────────────────────────────────────
+  const buys = brief.recommendations.filter((r) => r.action === "BUY");
+  const sells = brief.recommendations.filter((r) => r.action === "SELL");
+  const holds = brief.recommendations.filter((r) => r.action === "HOLD");
 
-  // 5. Trade Recommendations (if any)
-  if (brief.recommendations.length > 0) {
-    output += `📋 *TRADE RECOMMENDATIONS*\n`;
-    for (const rec of brief.recommendations) {
-      const emoji = rec.action === "BUY" ? "🟢" : rec.action === "SELL" ? "🔴" : "🟡";
-      output += `${emoji} ${rec.action} ${rec.ticker}`;
-      if (rec.shares) output += ` (${rec.shares} shares)`;
-      if (rec.dollarAmount) output += ` ($${rec.dollarAmount.toFixed(0)})`;
-      output += `\n   ${rec.reason}\n`;
-      if (rec.requiresConfirmation) {
-        output += `   ⚠️ REQUIRES [CONFIRMED] REPLY\n`;
-      }
+  if (buys.length > 0) {
+    output += `✅ *BUY — TAKE ACTION TODAY*\n`;
+    for (const rec of buys) {
+      const dollars = rec.dollarAmount ? `$${rec.dollarAmount.toFixed(0)}` : "?";
+      output += `| ${rec.ticker} | +${rec.shares ? rec.shares + " shares (~" + dollars + ")" : dollars} | ${rec.reason.split(" drifted ")[1] ?? rec.reason}\n`;
+    }
+    output += `\n`;
+  }
+  if (sells.length > 0) {
+    output += `🔴 *SELL / TRIM*\n`;
+    for (const rec of sells) {
+      const proceeds = rec.dollarAmount ? `$${rec.dollarAmount.toFixed(0)}` : "?";
+      output += `| ${rec.ticker} | -${rec.shares ? rec.shares + " shares (~" + proceeds + ")" : proceeds} | ${rec.reason.split(" drifted ")[1] ?? rec.reason}\n`;
+    }
+    output += `\n`;
+  }
+  if (holds.length > 0) {
+    output += `⏸ *HOLD / DEFER — NO ACTION*\n`;
+    for (const rec of holds) {
+      output += `| ${rec.ticker} | ${rec.reason}\n`;
     }
     output += `\n`;
   }
 
-  // 6. Profit Maximizer
+  // ── 7. PROFIT MAXIMIZER ─────────────────────────────────────────────────────
   output += formatProfitMaximizerForBrief(brief.profitMaximizer);
   output += `\n\n`;
 
-  // ═══════════════════════════════════════════
-  // DUAL TRACK: SWING SIGNALS + CORE ACCUMULATION
-  // ═══════════════════════════════════════════
-
-  // SWING SIGNALS — satellite swing trades (not core holdings)
+  // ── 8. SWING POOL ────────────────────────────────────────────────────────────
   const swingPool = (brief as any).swingPool;
   if (swingPool) {
-    output += `📊 *SWING POOL*
-`;
-    output += `Available: $${swingPool.cashAvailable.toFixed(2)} | Realized P&L: ${swingPool.realizedPnL >= 0 ? "+" : ""}$${swingPool.realizedPnL.toFixed(2)}
-`;
+    output += `📊 *SWING POOL*\n`;
+    output += `Available: $${swingPool.cashAvailable.toFixed(2)} | Realized P&L: ${swingPool.realizedPnL >= 0 ? "+" : ""}$${swingPool.realizedPnL.toFixed(2)}\n`;
     output += `Active swings: ${swingPool.positions.length}/2 max\n`;
     if (swingPool.positions.length > 0) {
       for (const pos of swingPool.positions) {
-        output += `  📈 ${pos.ticker} | ${pos.signal}
-`;
-        output += `     Entry: $${pos.entryPrice.toFixed(2)} | Target: $${pos.targetPrice.toFixed(2)} | Stop: $${pos.stopLoss.toFixed(2)}
-`;
+        output += `  📈 ${pos.ticker} | ${pos.signal}\n`;
+        output += `     Entry: $${pos.entryPrice.toFixed(2)} | Target: $${pos.targetPrice.toFixed(2)} | Stop: $${pos.stopLoss.toFixed(2)}\n`;
       }
     } else {
-      output += `  (no active swings — deploy when RSI signal fires)\n`;
+      output += `  (no active swings)\n`;
     }
     output += `\n`;
   }
 
-  // SWING TRADE CALLS — actionable buy/sell for satellite capital
-  const topSetups = (brief as any).topSetups;
-  if (topSetups && topSetups.length > 0) {
-    output += `🎯 *SWING SIGNALS* (satellite capital only — NOT core holdings)\n`;
-    output += `_For swing pool: $${swingPool?.cashAvailable?.toFixed(0) ?? 0} available. Max 2 concurrent swings._\n\n`;
-    for (const setup of topSetups) {
-      const confBar = setup.confidenceScore >= 75 ? "🟢" : setup.confidenceScore >= 55 ? "🟡" : "🔴";
-      output += `${confBar} 📈 BUY ${setup.ticker}
-`;
-      output += `   Entry: $${setup.entryPrice.toFixed(2)} → Target: $${setup.targetPrice.toFixed(2)} | Stop: $${setup.stopLoss.toFixed(2)}
-`;
-      output += `   R/R: ${setup.riskReward.toFixed(1)}:1 | Profit: $${setup.potentialProfitDollar.toFixed(0)} | Hold: ${setup.holdDaysEstimate}d | Confidence: ${setup.confidenceScore}/100\n`;
-      output += `   Because: ${setup.signal.replace(/_/g, " ").toLowerCase()}\n\n`;
-    }
-  }
-
-  // CORE ACCUMULATION — when to buy VOO/VTI/QQQ
+  // ── 9. CORE ACCUMULATION ────────────────────────────────────────────────────
   const coreAccum = (brief as any).coreAccumulation;
   if (coreAccum && coreAccum.length > 0) {
     output += `🏦 *CORE ACCUMULATION SIGNALS*\n`;
@@ -182,32 +176,9 @@ export function formatBriefAsTelegram(brief: MorningBrief): string {
       output += `${emoji} *${s.action} ${s.ticker}* — ${s.reason}\n`;
     }
     output += `\n`;
-  } else if (coreAccum && coreAccum.length === 0) {
-    output += `🏦 *CORE ACCUMULATION*
-  VOO/VTI/QQQ: No signal — RSI not in ideal accumulation zone (55-65) or overextended (>75). Defer until pullback.\n\n`;
   }
 
-  // INVESTOR PERSONA CHECKS
-  const invOut = (brief as any).investorOutput;
-  if (invOut) {
-    if (invOut.buffettLensed.length > 0) {
-      output += `🟢 *BUFFETT LENS — passed*
-`;
-      for (const s of invOut.buffettLensed.slice(0, 2)) {
-        output += `  ${s.ticker}: ${s.signal} | $${s.potentialProfitDollar.toFixed(0)} profit | R/R ${s.riskReward.toFixed(1)}:1\n`;
-      }
-    }
-    if (invOut.grahamLensed.length > 0) {
-      output += `🟡 *GRAHAM LENS — passed*
-`;
-      for (const s of invOut.grahamLensed.slice(0, 2)) {
-        output += `  ${s.ticker}: ${s.signal} | $${s.potentialProfitDollar.toFixed(0)} profit\n`;
-      }
-    }
-    output += `\n`;
-  }
-
-  // 7. Scheduled Actions (require confirmation)
+  // ── 10. PENDING CONFIRMATION ─────────────────────────────────────────────────
   if (brief.scheduledActions.length > 0) {
     output += `⏳ *PENDING CONFIRMATION*\n`;
     for (const action of brief.scheduledActions) {
@@ -217,7 +188,7 @@ export function formatBriefAsTelegram(brief: MorningBrief): string {
     output += `\n`;
   }
 
-  // Footer
+  // ── FOOTER ──────────────────────────────────────────────────────────────────
   output += `${"═".repeat(30)}\n`;
   output += `_Capital Pilot v1.0 | All actions flagged for decision_`;
 
@@ -280,17 +251,16 @@ export function formatCostOfCarry(positions: any[]): string {
 `;
   }
 
+  const effRate = totalValue > 0 ? (totalAnnualFee / totalValue * 100).toFixed(2) : "0.00";
   output += `   ─────────────────
+   Total: $${totalAnnualFee.toFixed(2)}/yr on $${totalValue.toFixed(0)}
+   Effective: ${effRate}%
 `;
-  output += `   Total: $${totalAnnualFee.toFixed(2)}/yr on $${totalValue.toLocaleString()}
-`;
-  output += `   Effective: ${((totalAnnualFee / totalValue) * 100).toFixed(2)}%
-`;
-
   if (flagged.length > 0) {
-    output += `   ⚠️ ${flagged.map(p => p.ticker).join(", ")} > 0.20% ER — review vs performance
+    const names = flagged.map((p) => p.ticker).join(", ");
+    output += `   ⚠️ ${names} > 0.20% ER — review vs performance
 `;
   }
 
-  return output;
+  return output + `\n`;
 }
