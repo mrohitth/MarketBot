@@ -11,7 +11,7 @@ import {
 import { formatBudgetPacingForBrief } from "./budget";
 import { formatMarketSummary, formatPositionsForBrief } from "./market";
 import { formatProfitMaximizerForBrief } from "./profitMaximizer";
-import { formatDiscoverySummary } from "./market_discovery";
+import { formatDiscoverySummary, computeDiscoveryConfidence, loadQueue } from "./market_discovery";
 import { SwingState } from "./swing_manager";
 import { InvestorOutput } from "./investor_filter";
 
@@ -124,8 +124,7 @@ export function formatBriefAsTelegram(brief: MorningBrief): string {
   const holds = brief.recommendations.filter((r) => r.action === "HOLD");
 
   if (buys.length > 0) {
-    output += `✅ *BUY — REBALANCE INTO UNDERWEIGHT*
-`;
+    output += `✅ *BUY — REBALANCE INTO UNDERWEIGHT*\n`;
     output += `_Drift-based. Ignores short-term RSI. Check RSI column above before acting.\n`;
     output += `_Confidence: 🟢 high  🟡 medium  🔴 low.\n`;
     for (const rec of buys) {
@@ -136,8 +135,7 @@ export function formatBriefAsTelegram(brief: MorningBrief): string {
     output += `\n`;
   }
   if (sells.length > 0) {
-    output += `🔴 *SELL / TRIM — REBALANCE OUT OF OVERWEIGHT*
-`;
+    output += `🔴 *SELL / TRIM — REBALANCE OUT OF OVERWEIGHT*\n`;
     output += `_Drift-based. Ignores short-term RSI. Confidence per rec shown below.\n`;
     for (const rec of sells) {
       const proceeds = rec.dollarAmount ? `$${rec.dollarAmount.toFixed(0)}` : "?";
@@ -147,8 +145,7 @@ export function formatBriefAsTelegram(brief: MorningBrief): string {
     output += `\n`;
   }
   if (holds.length > 0) {
-    output += `⏸ *HOLD / DEFER*
-`;
+    output += `⏸ *HOLD / DEFER*\n`;
     for (const rec of holds) {
       output += `| ${rec.ticker} | ${rec.reason}\n`;
     }
@@ -176,7 +173,7 @@ export function formatBriefAsTelegram(brief: MorningBrief): string {
     output += `\n`;
   }
 
-  // ── 10. PENDING CONFIRMATION ─────────────────────────────────────────────────
+  // ── 9. PENDING CONFIRMATION ─────────────────────────────────────────────────
   if (brief.scheduledActions.length > 0) {
     output += `⏳ *PENDING CONFIRMATION*\n`;
     for (const action of brief.scheduledActions) {
@@ -186,14 +183,94 @@ export function formatBriefAsTelegram(brief: MorningBrief): string {
     output += `\n`;
   }
 
-  // ── 9. MARKET DISCOVERY (new opportunities outside portfolio) ─────────────
-  // BUY / SELL / HOLD signal per opportunity — RSI + price position context.
-  // Source: tag-along (Finnhub news), volume-surge (broad screen), momentum-runner (gaps).
+  // ── 10. MARKET DISCOVERY (new opportunities outside portfolio) ─────────────
   const discoverySummary = formatDiscoverySummary();
   if (discoverySummary) {
     output += discoverySummary;
     output += `\n`;
   }
+
+  // ── 11. CONSOLIDATED DECISION SUMMARY ─────────────────────────────────────
+  output += `📋 *DECISION SUMMARY* — All Calls\n`;
+  output += `"${"─".repeat(35)}\n`;
+
+  // REBALANCE
+  const rebalanceBuys = brief.recommendations.filter(r => r.action === "BUY");
+  const rebalanceSells = brief.recommendations.filter(r => r.action === "SELL");
+  const cashEquivalents = new Set(["SPAXX", "VNAXX", "FZFXX", "FGTXX"]);
+  const filteredRebalanceBuys = rebalanceBuys.filter(r => !cashEquivalents.has(r.ticker));
+  const filteredRebalanceSells = rebalanceSells.filter(r => !cashEquivalents.has(r.ticker));
+  if (filteredRebalanceBuys.length > 0 || filteredRebalanceSells.length > 0) {
+    output += `🔄 *REBALANCE*\n`;
+    for (const r of filteredRebalanceBuys) {
+      const confScore = r.confidence === "high" ? 78 : r.confidence === "medium" ? 65 : 48;
+      const confLabel = confScore >= 70 ? "🟢" : confScore >= 55 ? "🟡" : "🔴";
+      output += `  ${confLabel} BUY  ${r.ticker.padEnd(6)} +${r.shares ?? "?"} shares (~$${r.dollarAmount?.toFixed(0) ?? "?"})  conf: ${confScore}/100\n`;
+    }
+    for (const r of filteredRebalanceSells) {
+      const confScore = r.confidence === "high" ? 78 : r.confidence === "medium" ? 65 : 48;
+      const confLabel = confScore >= 70 ? "🟢" : confScore >= 55 ? "🟡" : "🔴";
+      output += `  ${confLabel} SELL ${r.ticker.padEnd(6)} -${r.shares ?? "?"} shares (~$${r.dollarAmount?.toFixed(0) ?? "?"})  conf: ${confScore}/100\n`;
+    }
+    output += `\n`;
+  }
+
+  // PROFIT MAXIMIZER
+  if (brief.profitMaximizer && brief.profitMaximizer.length > 0) {
+    output += `🚀 *PROFIT MAXIMIZER* (swing pool)\n`;
+    for (const pm of brief.profitMaximizer) {
+      const rr = (pm as any).riskRewardRatio ?? (pm as any).riskReward ?? 0;
+      const confScore = rr >= 0.8 ? 72 : rr >= 0.5 ? 63 : 45;
+      const confLabel = confScore >= 70 ? "🟢" : confScore >= 55 ? "🟡" : "🔴";
+      output += `  ${confLabel} BUY  ${pm.ticker.padEnd(6)} entry: $${pm.entryPrice?.toFixed(2)}  R/R: ${rr.toFixed(1)}:1  conf: ${confScore}/100\n`;
+    }
+    output += `\n`;
+  }
+
+  // CORE ACCUMULATION
+  if (coreAccum && coreAccum.length > 0) {
+    output += `🏦 *CORE ACCUMULATION*\n`;
+    for (const s of coreAccum) {
+      const isBuy = s.action === "ACCUMULATE";
+      const confScore = isBuy ? 70 : 62;
+      output += `  ${isBuy ? "🟢" : "🟡"} ${s.action.padEnd(12)} ${s.ticker.padEnd(6)} — ${s.reason.split(" — ")[0] ?? s.reason}  conf: ${confScore}/100\n`;
+    }
+    output += `\n`;
+  }
+
+  // SWING POOL
+  const swingPositions = (brief as any).swingPool?.positions as any[] | undefined;
+  if (swingPositions && swingPositions.length > 0) {
+    output += `💹 *SWING POOL* (active)\n`;
+    for (const sp of swingPositions) {
+      const pnlSign = (sp.unrealizedPnL ?? 0) >= 0 ? "+" : "";
+      output += `  🟡 HOLD ${sp.ticker.padEnd(6)} ${sp.shares} shares  PnL: ${pnlSign}$${sp.unrealizedPnL?.toFixed(2) ?? "?"}  conf: 68/100\n`;
+    }
+    output += `\n`;
+  }
+
+  // DISCOVERY
+  const discQueue = loadQueue();
+  const newDiscEntries = discQueue.entries
+    .filter((e: any) => e.status === "new")
+    .sort((a: any, b: any) => {
+      const order: Record<string, number> = { "BUY": 0, "SELL": 1, "HOLD": 2 };
+      return (order[a.signal] ?? 9) - (order[b.signal] ?? 9);
+    });
+  if (newDiscEntries.length > 0) {
+    output += `🔍 *DISCOVERY*\n`;
+    for (const d of newDiscEntries) {
+      const confScore = computeDiscoveryConfidence(d as any);
+      const confLabel = confScore >= 70 ? "🟢" : confScore >= 55 ? "🟡" : "🔴";
+      const sigLabel = d.signal === "BUY" ? "BUY " : d.signal === "SELL" ? "SELL" : "HOLD";
+      const pricePos = d.pctOf52wHi > 95 ? "near 52w high" : d.pctOf52wHi < 50 ? "near 52w low" : `${d.pctOf52wHi.toFixed(0)}% of 52w`;
+      output += `  ${confLabel} ${sigLabel} ${d.ticker.padEnd(6)} RSI ${(d as any).rsi?.toFixed(0)} | ${pricePos}  conf: ${confScore}/100\n`;
+    }
+    output += `\n`;
+  }
+
+  output += `"${"─".repeat(35)}\n`;
+  output += `_Confidence: 🟢 70+  🟡 55-69  🔴 <55_\n\n`;
 
   // ── FOOTER ──────────────────────────────────────────────────────────────────
   output += `${"═".repeat(30)}\n`;
@@ -202,9 +279,6 @@ export function formatBriefAsTelegram(brief: MorningBrief): string {
   return output;
 }
 
-/**
- * Determine overall market signal
- */
 function determineOverallSignal(quotes: Map<string, MarketData>): "bull" | "bear" | "neutral" {
   const signals = Array.from(quotes.values()).map((q) => q.status);
   const bullCount = signals.filter((s) => s === "bull").length;

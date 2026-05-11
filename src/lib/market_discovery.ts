@@ -428,7 +428,7 @@ async function screenUnusualActivity(): Promise<{
 // DISCOVERY QUEUE (WARM BENCH)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function loadQueue(): DiscoveryQueue {
+export function loadQueue(): DiscoveryQueue {
   const filePath = path.resolve(DISCOVERY_QUEUE_FILE);
   if (!fs.existsSync(filePath)) {
     return { entries: [], lastUpdated: new Date().toISOString() };
@@ -748,7 +748,7 @@ function patchMissingSignals(entries: DiscoveryEntry[]): DiscoveryEntry[] {
   });
 }
 
-function computeDiscoveryConfidence(entry: DiscoveryEntry): number {
+export function computeDiscoveryConfidence(entry: DiscoveryEntry): number {
   let score = 50;
   if (entry.source === "volume-surge") {
     const volRatio = entry.volumeAvg > 0 ? entry.volume / entry.volumeAvg : 0;
