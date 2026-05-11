@@ -256,8 +256,14 @@ export function formatBriefAsTelegram(brief: MorningBrief): string {
   if (swingPositions && swingPositions.length > 0) {
     output += `💹 *SWING POOL* (active)\n`;
     for (const sp of swingPositions) {
-      const pnlSign = (sp.unrealizedPnL ?? 0) >= 0 ? "+" : "";
-      output += `  🟡 HOLD ${sp.ticker.padEnd(6)} ${sp.shares} shares  PnL: ${pnlSign}$${sp.unrealizedPnL?.toFixed(2) ?? "?"}  conf: 68/100\n`;
+      const entryPrice = (sp as any).entryPrice ?? sp.currentPrice ?? 0;
+      const currentPrice = (sp as any).currentPrice ?? sp.currentPrice ?? entryPrice;
+      const shares = sp.shares ?? (sp as any).shares ?? 0;
+      const pnl = (currentPrice - entryPrice) * shares;
+      const confScore = (sp as any).confidenceScore ?? 68;
+      const confLabel = confScore >= 70 ? "🟢" : confScore >= 55 ? "🟡" : "🔴";
+      const pnlSign = pnl >= 0 ? "+" : "";
+      output += `  ${confLabel} HOLD ${sp.ticker.padEnd(6)} ${shares} shares  PnL: ${pnlSign}$${pnl.toFixed(2)}  conf: ${confScore}/100\n`;
     }
     output += `\n`;
   }
