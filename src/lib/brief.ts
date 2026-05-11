@@ -11,6 +11,7 @@ import {
 import { formatBudgetPacingForBrief } from "./budget";
 import { formatMarketSummary, formatPositionsForBrief } from "./market";
 import { formatProfitMaximizerForBrief } from "./profitMaximizer";
+import { formatDiscoverySummary } from "./market_discovery";
 import { SwingState } from "./swing_manager";
 import { InvestorOutput } from "./investor_filter";
 
@@ -182,6 +183,15 @@ export function formatBriefAsTelegram(brief: MorningBrief): string {
       output += `• ${action.description}\n`;
       output += `  Reply [CONFIRMED] to execute\n`;
     }
+    output += `\n`;
+  }
+
+  // ── 9. MARKET DISCOVERY (new opportunities outside portfolio) ─────────────
+  // BUY / SELL / HOLD signal per opportunity — RSI + price position context.
+  // Source: tag-along (Finnhub news), volume-surge (broad screen), momentum-runner (gaps).
+  const discoverySummary = formatDiscoverySummary();
+  if (discoverySummary) {
+    output += discoverySummary;
     output += `\n`;
   }
 

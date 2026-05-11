@@ -102,6 +102,7 @@ export interface DiscoveryEntry {
   volumeAvg: number;
   pctOf52wHi: number;        // 0-100
   vs50dPct: number;          // % above/below MA50
+  signal: "BUY" | "SELL" | "HOLD";  // computed decision signal
   status: "new" | "reviewed" | "promoted" | "dismissed";
   notes?: string;
   headlinePreview?: string;   // what triggered it
@@ -493,6 +494,18 @@ function addToQueue(
     vs50dPct: techData?.ma50
       ? +(((techData.price / techData.ma50) - 1) * 100).toFixed(1)
       : 0,
+    signal: computeSignal({
+      ticker, source,
+      price: techData?.price ?? 0,
+      rsi: techData?.rsi ?? 50,
+      ma50: techData?.ma50 ?? 0, ma200: techData?.ma200 ?? 0,
+      volume: techData?.volume ?? 0, volumeAvg: techData?.volumeAvg ?? 0,
+      pctOf52wHi: techData?.fiftyTwoWeekHigh
+        ? +((techData.price / techData.fiftyTwoWeekHigh) * 100).toFixed(1) : 100,
+      vs50dPct: techData?.ma50
+        ? +(((techData.price / techData.ma50) - 1) * 100).toFixed(1) : 0,
+      status: "new",
+    } as DiscoveryEntry),
     status: "new",
     headlinePreview: headlinePreview?.slice(0, 200) ?? undefined,
   });
@@ -587,6 +600,19 @@ export async function runDiscovery(skipVolumeScreen = false): Promise<DiscoveryR
         vs50dPct: techData.ma50
           ? +(((techData.price / techData.ma50) - 1) * 100).toFixed(1)
           : 0,
+        signal: computeSignal({
+          ticker: ta.ticker,
+          source: "tag-along",
+          price: techData.price,
+          rsi: techData.rsi,
+          ma50: techData.ma50,
+          ma200: techData.ma200,
+          volume: techData.volume,
+          volumeAvg: techData.volumeAvg,
+          pctOf52wHi: techData.fiftyTwoWeekHigh ? +((techData.price / techData.fiftyTwoWeekHigh) * 100).toFixed(1) : 100,
+          vs50dPct: techData.ma50 ? +(((techData.price / techData.ma50) - 1) * 100).toFixed(1) : 0,
+          status: "new",
+        } as DiscoveryEntry),
         status: "new",
         headlinePreview: ta.headline.slice(0, 200),
       });
@@ -627,6 +653,18 @@ export async function runDiscovery(skipVolumeScreen = false): Promise<DiscoveryR
       vs50dPct: techData?.ma50
         ? +(((vs.price / techData.ma50) - 1) * 100).toFixed(1)
         : 0,
+      signal: computeSignal({
+        ticker: vs.ticker, source: "volume-surge",
+        price: techData?.price ?? vs.price,
+        rsi: techData?.rsi ?? vs.rsi,
+        ma50: techData?.ma50 ?? 0, ma200: techData?.ma200 ?? 0,
+        volume: techData?.volume ?? 0, volumeAvg: techData?.volumeAvg ?? 0,
+        pctOf52wHi: techData?.fiftyTwoWeekHigh
+          ? +((vs.price / techData.fiftyTwoWeekHigh) * 100).toFixed(1) : 100,
+        vs50dPct: techData?.ma50
+          ? +(((vs.price / techData.ma50) - 1) * 100).toFixed(1) : 0,
+        status: "new",
+      } as DiscoveryEntry),
       status: "new",
     });
   }
@@ -649,6 +687,16 @@ export async function runDiscovery(skipVolumeScreen = false): Promise<DiscoveryR
       volumeAvg: techData?.volumeAvg ?? 0,
       pctOf52wHi: mr.pctOf52wHi,
       vs50dPct: mr.vs50dPct,
+      signal: computeSignal({
+        ticker: mr.ticker, source: "momentum-runner",
+        price: techData?.price ?? mr.price,
+        rsi: techData?.rsi ?? mr.rsi,
+        ma50: techData?.ma50 ?? 0, ma200: techData?.ma200 ?? 0,
+        volume: techData?.volume ?? 0, volumeAvg: techData?.volumeAvg ?? 0,
+        pctOf52wHi: mr.pctOf52wHi,
+        vs50dPct: mr.vs50dPct,
+        status: "new",
+      } as DiscoveryEntry),
       status: "new",
     });
   }
@@ -666,7 +714,40 @@ export async function runDiscovery(skipVolumeScreen = false): Promise<DiscoveryR
  * Get a human-readable summary of the current discovery queue for the scanner output.
  * Only shows "new" status entries. Sorted by: momentum-runner > volume-surge > tag-along.
  */
+/**
+ * Compute a BUY / SELL / HOLD signal for a discovery entry.
+ * Logic:
+ *   BUY  — RSI < 55 (not overbought) + price within 30% of 52w low OR
+ *           RSI in 40-55 sweet spot + dip vs 50d MA
+ *   SELL — RSI > 68 (overbought) AND price > 95% of 52w high (extended)
+ *   HOLD — everything else (neutral zone)
+ */
+function computeSignal(entry: DiscoveryEntry): "BUY" | "SELL" | "HOLD" {
+  // SELL: overbought + extended = avoid
+  if (entry.rsi > 68 && entry.pctOf52wHi > 90) return "SELL";
+  // BUY: RSI in oversold-to-neutral range (40-55) + not extremely extended
+  if (entry.rsi >= 40 && entry.rsi < 68 && entry.pctOf52wHi < 95) {
+    // Confirm momentum isn't already exhausted
+    if (entry.vs50dPct < 25) return "BUY";
+  }
+  // BUY: RSI < 40 (oversold) + reasonable entry point
+  if (entry.rsi < 40 && entry.pctOf52wHi < 95) return "BUY";
+  return "HOLD";
+}
+
 /** Compute a discovery confidence score 0-100 */
+
+/**
+ * Backfill signal field for any queue entries that were persisted before
+ * the signal field existed. Mutates entries in place.
+ */
+function patchMissingSignals(entries: DiscoveryEntry[]): DiscoveryEntry[] {
+  return entries.map(e => {
+    if ((e as any).signal) return e;
+    return { ...e, signal: computeSignal(e) };
+  });
+}
+
 function computeDiscoveryConfidence(entry: DiscoveryEntry): number {
   let score = 50;
   if (entry.source === "volume-surge") {
@@ -708,6 +789,8 @@ function confidenceBar(score: number): string {
  */
 export function formatDiscoverySummary(): string {
   const queue = loadQueue();
+  // Backfill signal for any entries that predate the signal field
+  queue.entries = patchMissingSignals(queue.entries);
   const newEntries = queue.entries.filter(e => e.status === "new")
     .sort((a, b) => {
       const order = { "tag-along": 0, "volume-surge": 1, "momentum-runner": 2 };
@@ -731,13 +814,13 @@ export function formatDiscoverySummary(): string {
     const icon = entry.source === "volume-surge" ? "📊" :
                  entry.source === "momentum-runner" ? "🚀" : "🔗";
     const dir = entry.vs50dPct > 20 ? "Extended" : entry.vs50dPct < -10 ? "Dip" : "Neutral";
-    const rsiNote = entry.rsi <= 42 ? " Oversold" : entry.rsi >= 68 ? " Overbought" : "";
+    const rsiLabel = entry.rsi <= 40 ? "Oversold" : entry.rsi <= 55 ? "Neutral" : entry.rsi <= 68 ? "Elevated" : "Overbought";
     const conf = computeDiscoveryConfidence(entry);
     const bar = confidenceBar(conf);
-    output += `${icon} *${entry.ticker}* — ${dir} ($${entry.price.toFixed(2)})${rsiNote}   ${bar}
-`;
-    output += `   RSI: ${entry.rsi.toFixed(0)} | vs 52w: ${entry.pctOf52wHi.toFixed(0)}% | vs MA50: ${entry.vs50dPct >= 0 ? "+" : ""}${entry.vs50dPct.toFixed(1)}%
-`;
+    const signalBadge = entry.signal === "BUY" ? "🟢 BUY" : entry.signal === "SELL" ? "🔴 SELL" : "🟡 HOLD";
+    const pricePos = entry.pctOf52wHi > 95 ? "Near 52w high" : entry.pctOf52wHi < 50 ? "Near 52w low" : `${entry.pctOf52wHi.toFixed(0)}% of 52w`;
+    output += `${icon} *${entry.ticker}* ${signalBadge} | RSI ${entry.rsi.toFixed(0)} (${rsiLabel}) | ${pricePos}   ${bar}\n`;
+    output += `   Price: $${entry.price.toFixed(2)} | vs MA50: ${entry.vs50dPct >= 0 ? "+" : ""}${entry.vs50dPct.toFixed(1)}%\n`;
     if (entry.catalyst) output += `   📰 ${entry.catalyst}
 `;
     if (entry.headlinePreview) output += `   “${entry.headlinePreview.slice(0, 100)}”
