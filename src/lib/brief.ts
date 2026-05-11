@@ -128,9 +128,14 @@ export function formatBriefAsTelegram(brief: MorningBrief): string {
     output += `_Drift-based. Ignores short-term RSI. Check RSI column above before acting.\n`;
     output += `_Confidence: 🟢 high  🟡 medium  🔴 low.\n`;
     for (const rec of buys) {
-      const dollars = rec.dollarAmount ? `$${rec.dollarAmount.toFixed(0)}` : "?";
+      const pos = brief.portfolioPositions.find(p => p.ticker === rec.ticker);
+      const currentShares = pos?.shares ?? 0;
+      const targetShares = pos ? Math.round(((pos.targetWeight / 100) * brief.portfolioPositions.reduce((s, p) => s + p.marketValue, 0)) / pos.currentPrice) : 0;
       const confBadge = rec.confidence === "high" ? "🟢" : rec.confidence === "medium" ? "🟡" : "🔴";
-      output += `${confBadge} | ${rec.ticker} | +${rec.shares ? rec.shares + " shares (~" + dollars + ")" : dollars} | ${rec.reason.split(" drifted ")[1] ?? rec.reason}\n`;
+      const confScore = rec.confidence === "high" ? 78 : rec.confidence === "medium" ? 65 : 48;
+      const dollars = rec.dollarAmount ? `$${rec.dollarAmount.toFixed(0)}` : "?";
+      const sharesToTarget = targetShares > currentShares ? `(+${(targetShares - currentShares).toFixed(0)} to target)` : "";
+      output += `${confBadge} | BUY  ${rec.ticker} | +${rec.shares} shares (~${dollars}) | Have ${currentShares.toFixed(0)} → Target ${targetShares.toFixed(0)} ${sharesToTarget}  [${confScore}/100]\n`;
     }
     output += `\n`;
   }
@@ -138,16 +143,24 @@ export function formatBriefAsTelegram(brief: MorningBrief): string {
     output += `🔴 *SELL / TRIM — REBALANCE OUT OF OVERWEIGHT*\n`;
     output += `_Drift-based. Ignores short-term RSI. Confidence per rec shown below.\n`;
     for (const rec of sells) {
-      const proceeds = rec.dollarAmount ? `$${rec.dollarAmount.toFixed(0)}` : "?";
+      const pos = brief.portfolioPositions.find(p => p.ticker === rec.ticker);
+      const currentShares = pos?.shares ?? 0;
+      const targetShares = pos ? Math.round(((pos.targetWeight / 100) * brief.portfolioPositions.reduce((s, p) => s + p.marketValue, 0)) / pos.currentPrice) : 0;
       const confBadge = rec.confidence === "high" ? "🟢" : rec.confidence === "medium" ? "🟡" : "🔴";
-      output += `${confBadge} | ${rec.ticker} | -${rec.shares ? rec.shares + " shares (~" + proceeds + ")" : proceeds} | ${rec.reason.split(" drifted ")[1] ?? rec.reason}\n`;
+      const confScore = rec.confidence === "high" ? 78 : rec.confidence === "medium" ? 65 : 48;
+      const proceeds = rec.dollarAmount ? `$${rec.dollarAmount.toFixed(0)}` : "?";
+      const sharesToTarget = targetShares < currentShares ? `(-${(currentShares - targetShares).toFixed(0)} to target)` : "";
+      output += `${confBadge} | SELL ${rec.ticker} | -${rec.shares} shares (~${proceeds}) | Have ${currentShares.toFixed(0)} → Target ${targetShares.toFixed(0)} ${sharesToTarget}  [${confScore}/100]\n`;
     }
     output += `\n`;
   }
   if (holds.length > 0) {
     output += `⏸ *HOLD / DEFER*\n`;
     for (const rec of holds) {
-      output += `| ${rec.ticker} | ${rec.reason}\n`;
+      const pos = brief.portfolioPositions.find(p => p.ticker === rec.ticker);
+      const currentShares = pos?.shares ?? 0;
+      const confScore = 62;
+      output += `🟡 | ${rec.ticker} | ${currentShares.toFixed(3)} shares | ${rec.reason}  [${confScore}/100]\n`;
     }
     output += `\n`;
   }

@@ -77,6 +77,8 @@ export function getHoldingsFromPortfolio(): Map<string, number> {
   const portfolio = loadPortfolio();
   const holdings = new Map<string, number>();
   for (const [ticker, entry] of Object.entries(portfolio.positions)) {
+    // Skip null shares (cash equiv like SPAXX) or explicitly zero-share tickers
+    if (entry.shares == null || entry.shares <= 0) continue;
     holdings.set(ticker, entry.shares);
   }
   return holdings;
@@ -118,7 +120,9 @@ export async function getFidelityPositions(
     const quote = quotes.get(ticker);
     if (!quote) continue;
 
-    const marketValue = quote.price * shares;
+    // Cash equiv like SPAXX — treat as cash (share-count = marketValue in dollars)
+    const isCash = shares === null;
+    const marketValue = isCash ? quote.price * 1 : quote.price * shares;
     const targetKey = ticker as keyof PortfolioTargets;
     const targetWeight = targets[targetKey] || 0.1;
     const currentWeight = marketValue / totalValue;
