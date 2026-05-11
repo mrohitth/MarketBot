@@ -10,13 +10,14 @@ is_market_open() {
   # TZ prefix inside $(...) only affects the date command, not the variable assignment
   local day time
   day=$(TZ=America/New_York date +%u)    # 1=Mon … 7=Sun
-  time=$(TZ=America/New_York date +%H%M)  # HHMM e.g. 0930, 1559
+  time_raw=$(TZ=America/New_York date +%H%M)
+  time=$((10#$time_raw))  # strip leading zero (0008 -> 8)
 
   # Weekend → closed
   [[ "$day" -ge 1 && "$day" -le 5 ]] || return 1
 
   # 9:30 AM–4:00 PM ET → open
-  [[ "$time" -ge 0930 && "$time" -lt 1600 ]]
+  [[ "$time" -ge 930 && "$time" -lt 1600 ]]
 }
 
 # ── Run Scanner ────────────────────────────────────────────────────────────────

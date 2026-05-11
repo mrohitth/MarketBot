@@ -8,10 +8,12 @@ cd /home/mathew/MarketBot || exit 1
 
 # ── Market Hours Gate ──────────────────────────────────────────────────────
 is_market_open() {
-  DAY=$(TZ=America/New_York date +%u)
-  TIME=$(TZ=America/New_York date +%H%M)
+  local DAY=$(TZ=America/New_York date +%u)
+  local RAW_TIME=$(TZ=America/New_York date +%H%M)
+  # Strip leading zero to avoid octal interpretation (0008 -> 8)
+  local TIME=$((10#$RAW_TIME))
   [[ "$DAY" -ge 1 && "$DAY" -le 5 ]] || return 1
-  [[ "$TIME" -ge 0930 && "$TIME" -lt 1600 ]]
+  [[ "$TIME" -ge 930 && "$TIME" -lt 1600 ]]
 }
 
 if ! is_market_open; then
