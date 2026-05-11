@@ -46,7 +46,7 @@ export const VOLUME_SPIKE_MULTIPLIER = 1.5;
 /** Black swan threshold — extraordinary single-day move */
 export const BLACK_SWAN_THRESHOLD_PCT = 8;
 /** Core anchor tickers — managed via Core Accumulation signals, NOT drift-based sells */
-export const CORE_TICKERS = new Set(["VTI", "VOO", "QQQ"]);
+export const CORE_TICKERS = new Set(["VTI", "VOO", "QQQ", "ASTS"]);
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MOMENTUM EXTENDED — THREE-TIER PEAK DETECTION

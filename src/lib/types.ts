@@ -194,7 +194,7 @@ export interface BudgetLimits {
 
 // === Ticker Scopes ===
 
-export const PORTFOLIO_TICKERS = ["VTI", "NVDA", "VOO", "QQQ", "SMH", "SCHG", "VXUS", "SCHD", "SPYD", "ASTS", "SPAXX"] as const;
+export const PORTFOLIO_TICKERS = ["VTI", "NVDA", "VOO", "QQQ", "SMH", "XLE", "XLV", "AMGN", "CVX", "COIN", "VXUS", "SCHD", "ASTS", "SPAXX"] as const;
 export const MACRO_TICKERS = ["SPY", "QQQ", "DXY", "TLT", "GLD"] as const;
 
 /**
@@ -217,7 +217,7 @@ export const MACRO_TICKERS = ["SPY", "QQQ", "DXY", "TLT", "GLD"] as const;
  */
 export const WATCHLIST_TICKERS = [
   // Semi — 9 tickers (core of AI infrastructure theme)
-  "AMD", "TSM", "ASML", "INTC", "QCOM", "AMAT", "LRCX", "MU", "KLAC",
+  "AMD", "TSM", "ASML", "INTC", "QCOM", "AMAT", "LRCX", "MU", "KLAC", "COIN",
   // Tech — 8 tickers (picks-and-shovels + enterprise)
   "AVGO", "MRVL", "PANW", "MPWR", "SNPS", "CDNS", "ON", "SWKS",
   // Industrials — 5 tickers (defense + infrastructure capex)
