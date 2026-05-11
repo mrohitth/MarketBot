@@ -125,7 +125,8 @@ export function formatBriefAsTelegram(brief: MorningBrief): string {
   if (buys.length > 0) {
     output += `✅ *BUY — REBALANCE INTO UNDERWEIGHT*
 `;
-    output += `_Drift-based rebalancing. Ignores RSI/momentum. Confidence per rec shown below.\n`;
+    output += `_Drift-based. Ignores short-term RSI. Check RSI column above before acting.\n`;
+    output += `_Confidence: 🟢 high  🟡 medium  🔴 low.\n`;
     for (const rec of buys) {
       const dollars = rec.dollarAmount ? `$${rec.dollarAmount.toFixed(0)}` : "?";
       const confBadge = rec.confidence === "high" ? "🟢" : rec.confidence === "medium" ? "🟡" : "🔴";
@@ -136,7 +137,7 @@ export function formatBriefAsTelegram(brief: MorningBrief): string {
   if (sells.length > 0) {
     output += `🔴 *SELL / TRIM — REBALANCE OUT OF OVERWEIGHT*
 `;
-    output += `_Drift-based rebalancing. Ignores RSI/momentum. Confidence per rec shown below.\n`;
+    output += `_Drift-based. Ignores short-term RSI. Confidence per rec shown below.\n`;
     for (const rec of sells) {
       const proceeds = rec.dollarAmount ? `$${rec.dollarAmount.toFixed(0)}` : "?";
       const confBadge = rec.confidence === "high" ? "🟢" : rec.confidence === "medium" ? "🟡" : "🔴";
