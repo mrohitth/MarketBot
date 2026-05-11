@@ -86,9 +86,9 @@ import { scanMomentumBreakouts, formatMomentumAlerts } from "./lib/momentum_scan
 
 const GMAIL_USER = process.env.GMAIL_USER || "";
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD || "";
-const MONTHLY_NET_INCOME = parseInt(process.env.MONTHLY_NET_INCOME || "5917");
+export const MONTHLY_NET_INCOME = parseInt(process.env.MONTHLY_NET_INCOME || "5917");
 
-const BUDGET_LIMITS: BudgetLimits = {
+export const BUDGET_LIMITS: BudgetLimits = {
   dining: 600,
   transportation: 300,
   subscriptions: 100,
