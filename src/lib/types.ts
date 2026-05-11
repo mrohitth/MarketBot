@@ -194,7 +194,7 @@ export interface BudgetLimits {
 
 // === Ticker Scopes ===
 
-export const PORTFOLIO_TICKERS = ["VTI", "NVDA", "VOO", "QQQ", "SMH", "XLE", "XLV", "AMGN", "CVX", "COIN", "VXUS", "SCHD", "ASTS", "SPAXX"] as const;
+export const PORTFOLIO_TICKERS = ["VTI", "NVDA", "VOO", "QQQ", "SMH", "XLE", "XLV", "AMGN", "CVX", "COIN", "VXUS", "SCHD", "SPAXX"] as const;
 export const MACRO_TICKERS = ["SPY", "QQQ", "DXY", "TLT", "GLD"] as const;
 
 /**

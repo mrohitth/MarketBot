@@ -46,7 +46,7 @@ export const VOLUME_SPIKE_MULTIPLIER = 1.5;
 /** Black swan threshold — extraordinary single-day move */
 export const BLACK_SWAN_THRESHOLD_PCT = 8;
 /** Core anchor tickers — managed via Core Accumulation signals, NOT drift-based sells */
-export const CORE_TICKERS = new Set(["VTI", "VOO", "QQQ", "ASTS"]);
+export const CORE_TICKERS = new Set(["VTI", "VOO", "QQQ", "XLE", "XLV", "AMGN", "COIN", "CVX"]);
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MOMENTUM EXTENDED — THREE-TIER PEAK DETECTION
@@ -547,19 +547,21 @@ export const DRIFT_THRESHOLDS_ADVISORY: Record<string, number> = {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export const PORTFOLIO_TARGET_ALLOCATION: Record<string, number> = {
-  NVDA:  0.35, // 35% — maximum conviction AI infrastructure bet
-  VTI:   0.15, // 15% — broad US market secondary anchor
-  VOO:   0.10, // 10% — S&P500 large-cap ballast
+  NVDA:  0.25, // 25% — AI infrastructure anchor
+  VTI:   0.15, // 15% — broad US market core
+  VOO:   0.10, // 10% — S&P500 ballast
   QQQ:   0.08, // 8% — tech/growth tilt
-  SMH:   0.10, // 10% — semi sector ETF (high conviction)
-  SCHG:  0.08, // 8% — large-cap growth (weekly $150 auto-invest)
-  XLE:   0.05, // 5% — energy satellite (sector rotation, RSI-driven)
-  XLV:   0.05, // 5% — healthcare satellite (sector rotation, RSI-driven)
+  SMH:   0.10, // 10% — semi sector (high conviction)
+  XLE:   0.07, // 7% — energy diversification (protected from drift sells)
+  XLV:   0.06, // 6% — healthcare diversification (protected from drift sells)
   VXUS:  0.04, // 4% — international diversification
   SCHD:  0.04, // 4% — dividend stability
   SPYD:  0.01, // 1% — tactical income
-  ASTS:  0.01, // 1% — speculative moonshot
+  ASTS:  0.00, // 0% — moonhot/momentum trade, NOT drift-managed
   SPAXX: 0.04, // 4% — cash buffer
+  AMGN:  0.0368, // 3.7% — small swing/hold
+  COIN:  0.0194, // 1.9% — small swing/hold
+  CVX:   0.0341, // 3.4% — energy satellite
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════

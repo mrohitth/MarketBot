@@ -255,7 +255,10 @@ export async function generateDailyBrief(config: Config = DEFAULT_CONFIG): Promi
 
   const allQuotes = new Map([...quotes, ...sectorQuotes]);
   const allSetups: TradeSetup[] = [];
+  // Filter out tickers already in portfolio or swing pool — no new BUY setups for existing positions
+  const portfolioTickers = new Set([...quotes.keys()]);
   for (const [, quote] of allQuotes) {
+    if (portfolioTickers.has(quote.ticker)) continue; // skip — already held
     const newsForTicker = newsSentiments.get(quote.ticker);
     const setups = generateTradeSetups(quote, portfolioValue, newsForTicker);
     allSetups.push(...setups);
