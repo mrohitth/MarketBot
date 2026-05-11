@@ -308,15 +308,44 @@ export function generateRebalanceRecommendations(positions: Position[]): TradeRe
       }
     }
     if (pos.status === "black-swan") {
-      recommendations.push({
-        action: "HOLD",
-        ticker: pos.ticker,
-        dollarAmount: Math.abs(pos.dayChange),
-        reason: `Black swan: ${pos.ticker} ${pos.dayChangePercent.toFixed(1)}%. Confirm before action.`,
-        confidence: "high",
-        requiresConfirmation: true,
-        type: "black-swan",
-      });
+      // Black swan override: only HOLD if the stock RALLIED (overweight black swan).
+      // If it DROPPED (underweight black swan = buying opportunity), treat as regular drift.
+      if (pos.drift < 0) {
+        // Stock dropped but is underweight — treat as drift BUY
+        const portfolioValue = positions.reduce((sum, p) => sum + p.marketValue, 0);
+        const rawSharesToMove = Math.abs((pos.drift / 100) * portfolioValue) / pos.currentPrice;
+        if (pos.shares > 0 && rawSharesToMove > 0) {
+          const mirrorTicker = "QQQ";
+          const mirrorPos = positions.find((p) => p.ticker === mirrorTicker);
+          const maxBuyShares = mirrorPos ? Math.floor((mirrorPos.marketValue * 0.5) / pos.currentPrice) : Math.floor(rawSharesToMove);
+          const sharesToMove = Math.min(Math.floor(rawSharesToMove), maxBuyShares);
+          if (sharesToMove > 0) {
+            const driftPct = Math.abs(pos.drift);
+            const confidence = driftPct > 50 ? "high" : driftPct > 20 ? "medium" : "low";
+            recommendations.push({
+              action: "BUY",
+              ticker: pos.ticker,
+              shares: sharesToMove,
+              dollarAmount: sharesToMove * pos.currentPrice,
+              reason: `${pos.ticker} dropped ${pos.dayChangePercent > 0 ? "+" : ""}${pos.dayChangePercent.toFixed(1)}% but is ${driftPct.toFixed(1)}% under target — rebalance buy on dip`,
+              confidence,
+              requiresConfirmation: false,
+              type: "rebalance",
+            });
+          }
+        }
+      } else {
+        // Stock rallied and is now overweight black swan — confirm before action
+        recommendations.push({
+          action: "HOLD",
+          ticker: pos.ticker,
+          dollarAmount: Math.abs(pos.dayChange),
+          reason: `Black swan: ${pos.ticker} ${pos.dayChangePercent > 0 ? "+" : ""}${pos.dayChangePercent.toFixed(1)}%. Confirm before action.`,
+          confidence: "high",
+          requiresConfirmation: true,
+          type: "black-swan",
+        });
+      }
     }
   }
 

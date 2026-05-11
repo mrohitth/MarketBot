@@ -117,57 +117,53 @@ export function formatBriefAsTelegram(brief: MorningBrief): string {
   }
   output += `\n`;
 
-  // ── 6. TRADE ACTIONS ─────────────────────────────────────────────────────────
+  // ── 6. REBALANCE ACTIONS (drift-based, not market-timing) ──────────────────
   const buys = brief.recommendations.filter((r) => r.action === "BUY");
   const sells = brief.recommendations.filter((r) => r.action === "SELL");
   const holds = brief.recommendations.filter((r) => r.action === "HOLD");
 
   if (buys.length > 0) {
-    output += `✅ *BUY — TAKE ACTION TODAY*\n`;
+    output += `✅ *BUY — REBALANCE INTO UNDERWEIGHT*
+`;
+    output += `_Drift-based rebalancing. Ignores RSI/momentum. Confidence per rec shown below.\n`;
     for (const rec of buys) {
       const dollars = rec.dollarAmount ? `$${rec.dollarAmount.toFixed(0)}` : "?";
-      output += `| ${rec.ticker} | +${rec.shares ? rec.shares + " shares (~" + dollars + ")" : dollars} | ${rec.reason.split(" drifted ")[1] ?? rec.reason}\n`;
+      const confBadge = rec.confidence === "high" ? "🟢" : rec.confidence === "medium" ? "🟡" : "🔴";
+      output += `${confBadge} | ${rec.ticker} | +${rec.shares ? rec.shares + " shares (~" + dollars + ")" : dollars} | ${rec.reason.split(" drifted ")[1] ?? rec.reason}\n`;
     }
     output += `\n`;
   }
   if (sells.length > 0) {
-    output += `🔴 *SELL / TRIM*\n`;
+    output += `🔴 *SELL / TRIM — REBALANCE OUT OF OVERWEIGHT*
+`;
+    output += `_Drift-based rebalancing. Ignores RSI/momentum. Confidence per rec shown below.\n`;
     for (const rec of sells) {
       const proceeds = rec.dollarAmount ? `$${rec.dollarAmount.toFixed(0)}` : "?";
-      output += `| ${rec.ticker} | -${rec.shares ? rec.shares + " shares (~" + proceeds + ")" : proceeds} | ${rec.reason.split(" drifted ")[1] ?? rec.reason}\n`;
+      const confBadge = rec.confidence === "high" ? "🟢" : rec.confidence === "medium" ? "🟡" : "🔴";
+      output += `${confBadge} | ${rec.ticker} | -${rec.shares ? rec.shares + " shares (~" + proceeds + ")" : proceeds} | ${rec.reason.split(" drifted ")[1] ?? rec.reason}\n`;
     }
     output += `\n`;
   }
   if (holds.length > 0) {
-    output += `⏸ *HOLD / DEFER — NO ACTION*\n`;
+    output += `⏸ *HOLD / DEFER*
+`;
     for (const rec of holds) {
       output += `| ${rec.ticker} | ${rec.reason}\n`;
     }
     output += `\n`;
   }
 
-  // ── 7. PROFIT MAXIMIZER ─────────────────────────────────────────────────────
+  // ── 7. PROFIT MAXIMIZER (RSI-oversold sector bounces) ─────────────────────
+  // BUY XLE/VHT on RSI oversold — satellite/momentum trade, NOT core rebalance.
+  // Confidence: 🟢 high / 🟡 medium / 🔴 low. R/R ratio = risk/reward.
   output += formatProfitMaximizerForBrief(brief.profitMaximizer);
   output += `\n\n`;
 
-  // ── 8. SWING POOL ────────────────────────────────────────────────────────────
-  const swingPool = (brief as any).swingPool;
-  if (swingPool) {
-    output += `📊 *SWING POOL*\n`;
-    output += `Available: $${swingPool.cashAvailable.toFixed(2)} | Realized P&L: ${swingPool.realizedPnL >= 0 ? "+" : ""}$${swingPool.realizedPnL.toFixed(2)}\n`;
-    output += `Active swings: ${swingPool.positions.length}/2 max\n`;
-    if (swingPool.positions.length > 0) {
-      for (const pos of swingPool.positions) {
-        output += `  📈 ${pos.ticker} | ${pos.signal}\n`;
-        output += `     Entry: $${pos.entryPrice.toFixed(2)} | Target: $${pos.targetPrice.toFixed(2)} | Stop: $${pos.stopLoss.toFixed(2)}\n`;
-      }
-    } else {
-      output += `  (no active swings)\n`;
-    }
-    output += `\n`;
-  }
-
-  // ── 9. CORE ACCUMULATION ────────────────────────────────────────────────────
+  // ── 8. CORE ACCUMULATION (when to add to VOO/VTI/QQQ) ────────────────────────
+  // ACCUMULATE = RSI in 55-65 sweet spot (good entry for core holdings).
+  // DEFER = RSI > 70 (overextended) — wait for pullback below 70.
+  // Orthogonal to Profit Maximizer: Core Accum = ADDING to core portfolio.
+  // Profit Maximizer = SATELLITE momentum trades (different capital).
   const coreAccum = (brief as any).coreAccumulation;
   if (coreAccum && coreAccum.length > 0) {
     output += `🏦 *CORE ACCUMULATION SIGNALS*\n`;
