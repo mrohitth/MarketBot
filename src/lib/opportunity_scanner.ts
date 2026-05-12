@@ -453,6 +453,56 @@ export async function scanForOpportunities(): Promise<Opportunity[]> {
     // Fetch news for all collected tickers
     const newsMap = await batchFetchNewsSentiment(Array.from(toCheck));
 
+    // 4. CROSS-REFERENCED TICKERS — extract company names from headlines
+    // If NVDA news mentions "investing in Corning", GLW should get flagged too.
+    // Uses the source headline + score directly (same event, different ticker).
+    const crossRefs = new Map<string, { sourceTicker: string; headline: string; score: number }>();
+    const nameToTicker: Record<string, string> = {
+      "CORNING": "GLW", "DELL": "DELL", "INTEL": "INTC",
+      "MICRON": "MU", "BROADCOM": "AVGO", "QUALCOMM": "QCOM",
+      "AMD": "AMD", "MARVELL": "MRVL", "MICROSOFT": "MSFT",
+      "APPLE": "AAPL", "META": "META", "GOOGLE": "GOOGL",
+      "AMAZON": "AMZN", "TESLA": "TSLA", "NETFLIX": "NFLX",
+      "PALANTIR": "PLTR", "ORACLE": "ORCL", "UBER": "UBER",
+      "GOLDMAN": "GS", "JPMORGAN": "JPM", "IBM": "IBM",
+      "CISCO": "CSCO", "ADOBE": "ADBE", "SAP": "SAP",
+    };
+    for (const [ticker, sentiment] of newsMap) {
+      if (sentiment.headlines.length === 0 || Math.abs(sentiment.score) < 15) continue;
+      for (const hl of sentiment.headlines) {
+        const upper = hl.toUpperCase();
+        // Parenthetical tickers: "NVIDIA (NVDA) invests in (GLW)"
+        const parenMatches = hl.matchAll(/\(([A-Z]{1,5})\)/g);
+        for (const m of parenMatches) {
+          const sym = m[1];
+          if (sym === ticker || ["CEO","IPO","ETF","FDA","GDP","CPI","EPS","AI","YTD","SEC","USA","USD","NYSE","NASDAQ"].includes(sym)) continue;
+          if (!crossRefs.has(sym)) crossRefs.set(sym, { sourceTicker: ticker, headline: hl, score: sentiment.score });
+        }
+        // Company names: "Corning" -> GLW
+        for (const [name, sym] of Object.entries(nameToTicker)) {
+          if (upper.includes(name) && sym !== ticker && !crossRefs.has(sym)) {
+            crossRefs.set(sym, { sourceTicker: ticker, headline: hl, score: sentiment.score });
+          }
+        }
+      }
+    }
+    for (const [sym, ref] of crossRefs) {
+      if (seenThisScan.has(sym)) continue;
+      seenThisScan.add(sym);
+      const isHeld = heldSet.has(sym);
+      const isWatch = watchlistQuotes.has(sym);
+      opportunities.push({
+        type: "news-event",
+        severity: "high" as const,
+        ticker: sym,
+        message: `🟢 CROSS-REF — ${sym}: Bullish`,
+        action: isHeld ? `REVIEW — ADD TO POSITION (via ${ref.sourceTicker})` : `REVIEW — NEW DISCOVERY (via ${ref.sourceTicker})`,
+        rationale: `Mentioned in ${ref.sourceTicker} news: ${ref.headline.substring(0, 100)}. ${isHeld ? "Held position." : isWatch ? "On watchlist." : "Not on radar."}`,
+        riskNote: "Cross-referenced ticker — verify the thesis independently.",
+        details: `Context scored ${ref.score}/30 on ${ref.sourceTicker}`,
+      });
+    }
+
     for (const [ticker, sentiment] of newsMap) {
       if (Math.abs(sentiment.score) < 15) continue;
       if (seenThisScan.has(ticker)) continue;
