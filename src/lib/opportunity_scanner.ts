@@ -491,15 +491,20 @@ export async function scanForOpportunities(): Promise<Opportunity[]> {
       seenThisScan.add(sym);
       const isHeld = heldSet.has(sym);
       const isWatch = watchlistQuotes.has(sym);
+      const bullish = ref.score > 0;
+      const direction = bullish ? "🟢" : "🔴";
+      const severity: "critical" | "high" = Math.abs(ref.score) > 25 ? "critical" : "high";
       opportunities.push({
         type: "news-event",
-        severity: "high" as const,
+        severity,
         ticker: sym,
-        message: `🟢 CROSS-REF — ${sym}: Bullish`,
-        action: isHeld ? `REVIEW — ADD TO POSITION (via ${ref.sourceTicker})` : `REVIEW — NEW DISCOVERY (via ${ref.sourceTicker})`,
-        rationale: `Mentioned in ${ref.sourceTicker} news: ${ref.headline.substring(0, 100)}. ${isHeld ? "Held position." : isWatch ? "On watchlist." : "Not on radar."}`,
-        riskNote: "Cross-referenced ticker — verify the thesis independently.",
-        details: `Context scored ${ref.score}/30 on ${ref.sourceTicker}`,
+        message: `${direction} CROSS-REF — ${sym}: ${bullish ? "Bullish" : "Bearish"} catalyst via ${ref.sourceTicker}`,
+        action: isHeld
+          ? (bullish ? `CONSIDER ADDING — ${ref.sourceTicker} catalyst` : `REVIEW EXPOSURE — ${ref.sourceTicker} catalyst`)
+          : (bullish ? `CONSIDER ENTRY — ${ref.sourceTicker} catalyst` : `AVOID — negative ${ref.sourceTicker} catalyst`),
+        rationale: `Mentioned in ${ref.sourceTicker} news: ${ref.headline.substring(0, 100)}. ${isHeld ? (bullish ? "Bullish for held position — consider adding." : "Bearish for held position — review exposure.") : (bullish ? "Bullish catalyst — evaluate for entry." : "Bearish catalyst — stay away.")}`,
+        riskNote: "Cross-referenced ticker. Verify the thesis independently — the news is about the source company, not this ticker directly.",
+        details: `Context scored ${Math.abs(ref.score)}/30 ${bullish ? "bullish" : "bearish"} on ${ref.sourceTicker}`,
       });
     }
 
