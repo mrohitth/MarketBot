@@ -195,19 +195,25 @@ Do not include any other text or explanation.`;
 
 /**
  * Batch-fetch news sentiment for multiple tickers concurrently.
- * Parallel requests, shared cache.
+ * Limited to 5 concurrent requests to avoid Finnhub rate limits (60/min free tier)
+ * and MiniMax API congestion. Remaining tickers are queued.
  */
 export async function batchFetchNewsSentiment(
   tickers: string[]
 ): Promise<Map<string, { score: number; label: string; headlines: string[] }>> {
   const results = new Map<string, { score: number; label: string; headlines: string[] }>();
+  const CONCURRENCY = 5;
 
-  await Promise.all(
-    tickers.map(async (ticker) => {
-      const result = await fetchNewsSentiment(ticker);
-      results.set(ticker, result);
-    })
-  );
+  // Process in batches of CONCURRENCY
+  for (let i = 0; i < tickers.length; i += CONCURRENCY) {
+    const batch = tickers.slice(i, i + CONCURRENCY);
+    await Promise.all(
+      batch.map(async (ticker) => {
+        const result = await fetchNewsSentiment(ticker);
+        results.set(ticker, result);
+      })
+    );
+  }
 
   return results;
 }
