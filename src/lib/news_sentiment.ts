@@ -48,8 +48,11 @@ export async function fetchNewsSentiment(ticker: string): Promise<{
   }
 
   try {
-    // Finnhub company news — last 24 hours, category=forex | crypto | merger
-    const url = `${FINNHUB_BASE}/news?category=general&token=${FINNHUB_API_KEY}`;
+    // Finnhub company-news endpoint — fetch last 2 days
+    const today = new Date();
+    const to = today.toISOString().split("T")[0];
+    const from = new Date(today.getTime() - 48 * 60 * 60 * 1000).toISOString().split("T")[0];
+    const url = `${FINNHUB_BASE}/company-news?symbol=${ticker}&from=${from}&to=${to}&token=${FINNHUB_API_KEY}`;
     const response = await fetch(url, { signal: AbortSignal.timeout(5000) });
 
     if (!response.ok) {
@@ -58,10 +61,10 @@ export async function fetchNewsSentiment(ticker: string): Promise<{
 
     const articles: FinnhubNewsItem[] = await response.json() as FinnhubNewsItem[];
 
-    // Filter to articles mentioning this ticker in the headline
+    // Use the headline-match filter as a secondary relevance check
     const tickerUpper = ticker.toUpperCase();
     const relevant = articles
-      .filter(a => a.headline.toUpperCase().includes(tickerUpper))
+      .filter(a => a.headline && a.headline.toUpperCase().includes(tickerUpper))
       .slice(0, 10); // cap at 10 articles
 
     if (relevant.length === 0) {
@@ -70,8 +73,26 @@ export async function fetchNewsSentiment(ticker: string): Promise<{
       return { score: 0, label: "neutral", headlines: [] };
     }
 
-    // Average sentiment: -1 to +1 → scale to -30 to +30
-    const avgSentiment = relevant.reduce((sum, a) => sum + (a.sentiment ?? 0), 0) / relevant.length;
+    // Compute sentiment: prefer Finnhub's built-in score, fall back to keyword heuristics
+    const hasRealSentiment = relevant.some(a => a.sentiment != null && a.sentiment !== 0);
+    let avgSentiment: number;
+    if (hasRealSentiment) {
+      avgSentiment = relevant.reduce((sum, a) => sum + (a.sentiment ?? 0), 0) / relevant.length;
+    } else {
+      // Keyword-based heuristic when Finnhub doesn't provide sentiment
+      const bullishKw = ["BUY", "UPGRADE", "RAISED", "BULLISH", "POSITIVE", "GROW", "PARTNER", "EARN", "BEAT", "SURGE", "GAIN", "MOMENTUM", "OUTPERFORM"];
+      const bearishKw = ["CUT", "DOWNGRADE", "SELL", "BEARISH", "INVESTIGATION", "LAWSUIT", "CRASH", "PLUNGE", "SLUMP", "WARNING", "RECALL", "DROPS", "HIT"];
+      let scoreSum = 0;
+      for (const a of relevant) {
+        const hl = a.headline.toUpperCase();
+        const bulls = bullishKw.filter(kw => hl.includes(kw)).length;
+        const bears = bearishKw.filter(kw => hl.includes(kw)).length;
+        // Per-article score: -1 (very bearish) to +1 (very bullish), capped
+        scoreSum += Math.max(-1, Math.min(1, (bulls - bears) * 0.33));
+      }
+      avgSentiment = scoreSum / relevant.length;
+    }
+
     const score = Math.round(avgSentiment * 30);
 
     const label: SentimentCache["label"] =

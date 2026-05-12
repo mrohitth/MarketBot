@@ -6,6 +6,11 @@
 set -e
 cd /home/mathew/MarketBot || exit 1
 
+# ── Load Environment ────────────────────────────────────────────────────────
+if [ -f .env ]; then
+  set -a; source .env; set +a
+fi
+
 # ── Market Hours Gate ──────────────────────────────────────────────────────
 is_market_open() {
   local DAY=$(TZ=America/New_York date +%u)
