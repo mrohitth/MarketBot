@@ -25,6 +25,7 @@ import {
   generateEntrySignals,
 } from "./recommendations";
 import { runDiscovery, formatDiscoverySummary } from "./market_discovery";
+import { batchFetchNewsSentiment } from "./news_sentiment";
 
 import * as fs from "fs";
 import * as path from "path";
@@ -415,6 +416,36 @@ export async function scanForOpportunities(): Promise<Opportunity[]> {
     });
   }
 
+  // ── 7. NEWS SENTINEL — Standalone News Alerts ────────────────────────
+  // Catches major news events (partnerships, acquisitions, regulatory rulings)
+  // that don't trigger technical signals. Every portfolio ticker is checked.
+  try {
+    const portfolioTickers = positions.map(p => p.ticker);
+    const newsMap = await batchFetchNewsSentiment(portfolioTickers);
+    for (const [ticker, sentiment] of newsMap) {
+      if (Math.abs(sentiment.score) < 15) continue;
+      if (seenThisScan.has(ticker)) continue;
+      seenThisScan.add(ticker);
+      const direction = sentiment.score > 0 ? "🟢" : "🔴";
+      const label = sentiment.label.toUpperCase();
+      const headline = sentiment.headlines[0] ?? "No headline available";
+      opportunities.push({
+        type: "news-event",
+        severity: "high" as const,
+        ticker,
+        message: `${direction} NEWS ALERT — ${ticker}: ${label}`,
+        action: sentiment.score > 0
+          ? "REVIEW — MONITOR FOR ENTRY"
+          : "REVIEW — CHECK EXPOSURE",
+        rationale: `News sentiment: ${label} (${sentiment.score}/30). Headline: ${headline}`,
+        riskNote: "News-driven moves can reverse quickly. Confirm with technicals before acting.",
+        details: `Score: ${sentiment.score}/30 | Source: Finnhub | ${sentiment.headlines.length} relevant articles`,
+      });
+    }
+  } catch (err) {
+    console.warn("[SCANNER] News sentinel skipped:", (err as Error).message);
+  }
+
   return opportunities.filter(o => !isSuppressed(o));
 }
 
@@ -443,12 +474,13 @@ export function formatOpportunityAlert(opps: Opportunity[]): string {
     (o.action.includes("DON'T BUY") || o.action.includes("DON'T CHASE") || o.action.includes("WAIT"))
     && !o.action.startsWith("BUY") && !o.action.startsWith("TRIM") && !o.action.startsWith("SELL")
   );
+  const newsEvents = opps.filter(o => o.type === "news-event");
 
   // Check if there are discoveries to show even when no trade signals
   const discoverySummary = formatDiscoverySummary();
 
-  // If nothing actionable (no buys, no trims, no pullbacks) AND no discoveries, stay silent
-  if (buys.length === 0 && sells.length === 0 && !discoverySummary) {
+  // If nothing actionable (no buys, no trims, no pullbacks, no news) AND no discoveries, stay silent
+  if (buys.length === 0 && sells.length === 0 && newsEvents.length === 0 && !discoverySummary) {
     return ""; // scanner will output "no alerts meet evidence threshold"
   }
 
@@ -533,6 +565,16 @@ export function formatOpportunityAlert(opps: Opportunity[]): string {
     const tickers = extended.slice(0, 8).map(o => o.ticker).join(", ");
     output += `🔭 *EXTENDED + ON RADAR* — ${tickers}${extended.length > 8 ? ` +${extended.length - 8} more` : ""}\n`;
     output += `_Peak zone / extended — don't chase. Will alert on pullback._\n\n`;
+  }
+
+  // ── News Sentinel ────────────────────────────────────────────────
+  if (newsEvents.length > 0) {
+    output += `📰 *BREAKING NEWS* (${newsEvents.length} event${newsEvents.length > 1 ? "s" : ""})\n`;
+    for (const evt of newsEvents) {
+      output += `${evt.message}\n`;
+      output += `   ${evt.rationale}\n`;
+      output += `   ⚠️ ${evt.riskNote}\n\n`;
+    }
   }
 
   // ── Discovery Summary ─────────────────────────────────────────────
