@@ -137,12 +137,12 @@ Do not include any other text or explanation.`;
       },
       body: JSON.stringify({
         model: "MiniMax-M2.7",
-        max_tokens: 300,
+        max_tokens: 1024,
         temperature: 0.1,  // low temperature for consistency
         system: "You are a precise financial sentiment analyzer. Respond only with valid JSON arrays.",
         messages: [{ role: "user", content: prompt }],
       }),
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(30000),
     });
 
     if (!response.ok) {
