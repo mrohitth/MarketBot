@@ -161,7 +161,9 @@ Do not include any other text or explanation.`;
 
     // Extract JSON array from whichever block has it — flexible pattern
     const extractJSON = (raw: string): number[] | null => {
-      const m = raw.match(/\[\s*[\d.,\-]+(?:\s*,\s*[\d.,\-]+)*\s*\]/);
+      // Strip markdown code fences first
+      let cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+      const m = cleaned.match(/\[\s*[\d.,\-]+(?:\s*,\s*[\d.,\-]+)*\s*\]/);
       if (!m) return null;
       try { return JSON.parse(m[0]) as number[]; } catch { return null; }
     };
