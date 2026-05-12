@@ -428,6 +428,8 @@ export async function scanForOpportunities(): Promise<Opportunity[]> {
   //   Bearish + not held → AVOID
   try {
     const heldSet = new Set(positions.map(p => p.ticker));
+    // Also add pure holdings (positions that may not have fresh quotes)
+    for (const [ticker] of holdings) heldSet.add(ticker);
 
     // ── Gather tickers to check ──────────────────────────────────────
     const toCheck = new Set<string>();
@@ -480,6 +482,18 @@ export async function scanForOpportunities(): Promise<Opportunity[]> {
             riskNote: "News-driven moves can gap up. Use a limit order. Catalyst may already be priced in.",
             details: `Score: ${absScore}/30 | ${sentiment.headlines.length} articles`,
           });
+        } else if (isHeld) {
+          // Held but no fresh quote — generic BUY guidance
+          opportunities.push({
+            type: "news-event",
+            severity,
+            ticker,
+            message: `🟢 NEWS ALERT — ${ticker}: ${sentiment.label.toUpperCase()} (${absScore}/30)`,
+            action: `REVIEW — CONSIDER ADDING TO POSITION`,
+            rationale: `Bullish catalyst: ${headline.substring(0, 100)}. Ticker is held (no live quote — check price manually).`,
+            riskNote: "No live price data. Verify current price before entering an order.",
+            details: `Score: ${absScore}/30 | ${sentiment.headlines.length} articles`,
+          });
         } else {
           // Not held + bullish catalyst → suggest reviewing for entry
           const via = isOnWatchlist ? "watchlist" : "discovery queue";
@@ -510,6 +524,21 @@ export async function scanForOpportunities(): Promise<Opportunity[]> {
               ? `SELL ${sharesToSell} shares (~$${Math.round(proceeds).toLocaleString()})`
               : `TRIM ${sharesToSell} shares (~$${Math.round(proceeds).toLocaleString()})`,
             rationale: `Bearish catalyst: ${headline.substring(0, 100)}. Position: ${pos.shares} sh @ $${pos.currentPrice.toFixed(2)}. ${isCritical ? "URGENT: sell before further downside." : `Trim -${sharesToSell} → ${pos.shares - sharesToSell} remaining.`}`,
+            riskNote: isCritical
+              ? "🚨 Bankruptcy / regulatory / fraud risk detected. Preserve capital."
+              : "News-driven selloffs can be temporary. Trim to reduce exposure.",
+            details: `Score: ${absScore}/30 | ${sentiment.headlines.length} articles`,
+          });
+        } else if (isHeld) {
+          // Held but no fresh quote — generic SELL/TRIM guidance
+          const isCritical = absScore > 25;
+          opportunities.push({
+            type: "news-event",
+            severity: isCritical ? "critical" as const : "high" as const,
+            ticker,
+            message: `🔴 ${isCritical ? "CRITICAL" : "WARNING"} — ${ticker}: ${sentiment.label.toUpperCase()} (${absScore}/30)`,
+            action: isCritical ? `SELL — REDUCE EXPOSURE` : `TRIM — REDUCE EXPOSURE`,
+            rationale: `Bearish catalyst: ${headline.substring(0, 100)}. Ticker is held (no live quote — check position manually).`,
             riskNote: isCritical
               ? "🚨 Bankruptcy / regulatory / fraud risk detected. Preserve capital."
               : "News-driven selloffs can be temporary. Trim to reduce exposure.",
