@@ -16,7 +16,9 @@ const cache = new Map<string, SentimentCache>();
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY ?? "";
+const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY ?? "";
 const FINNHUB_BASE = "https://finnhub.io/api/v1";
+const MINIMAX_BASE = "https://api.minimax.io/anthropic/v1/messages";
 
 interface FinnhubNewsItem {
   id: number;
@@ -53,7 +55,7 @@ export async function fetchNewsSentiment(ticker: string): Promise<{
     const to = today.toISOString().split("T")[0];
     const from = new Date(today.getTime() - 48 * 60 * 60 * 1000).toISOString().split("T")[0];
     const url = `${FINNHUB_BASE}/company-news?symbol=${ticker}&from=${from}&to=${to}&token=${FINNHUB_API_KEY}`;
-    const response = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
 
     if (!response.ok) {
       throw new Error(`Finnhub ${response.status}`);
@@ -73,31 +75,29 @@ export async function fetchNewsSentiment(ticker: string): Promise<{
       return { score: 0, label: "neutral", headlines: [] };
     }
 
-    // Compute sentiment: prefer Finnhub's built-in score, fall back to keyword heuristics
+    // Compute sentiment: prefer Finnhub's built-in score, fall back to MiniMax AI
     const hasRealSentiment = relevant.some(a => a.sentiment != null && a.sentiment !== 0);
     let avgSentiment: number;
     if (hasRealSentiment) {
       avgSentiment = relevant.reduce((sum, a) => sum + (a.sentiment ?? 0), 0) / relevant.length;
-    } else {
-      // Keyword-based heuristic when Finnhub doesn't provide sentiment
-      const bullishKw = ["BUY", "UPGRADE", "RAISED", "BULLISH", "POSITIVE", "GROW", "PARTNER", "EARN", "BEAT", "SURGE", "GAIN", "MOMENTUM", "OUTPERFORM"];
-      const bearishKw = ["CUT", "DOWNGRADE", "SELL", "BEARISH", "INVESTIGATION", "LAWSUIT", "CRASH", "PLUNGE", "SLUMP", "WARNING", "RECALL", "DROPS", "HIT"];
-      let scoreSum = 0;
-      for (const a of relevant) {
-        const hl = a.headline.toUpperCase();
-        const bulls = bullishKw.filter(kw => hl.includes(kw)).length;
-        const bears = bearishKw.filter(kw => hl.includes(kw)).length;
-        // Per-article score: -1 (very bearish) to +1 (very bullish), capped
-        scoreSum += Math.max(-1, Math.min(1, (bulls - bears) * 0.33));
+    } else if (MINIMAX_API_KEY) {
+      const aiResult = await computeSentimentViaAI(ticker, relevant.map(a => a.headline));
+      if (aiResult !== null) {
+        avgSentiment = aiResult;
+      } else {
+        // MiniMax failed — fall back to neutral
+        avgSentiment = 0;
       }
-      avgSentiment = scoreSum / relevant.length;
+    } else {
+      // No MiniMax key — neutral
+      avgSentiment = 0;
     }
 
     const score = Math.round(avgSentiment * 30);
 
     const label: SentimentCache["label"] =
-      score > 10 ? "positive" :
-      score < -10 ? "negative" :
+      score > 5 ? "positive" :
+      score < -5 ? "negative" :
       "neutral";
 
     const headlines = relevant.slice(0, 3).map(a => a.headline);
@@ -111,6 +111,85 @@ export async function fetchNewsSentiment(ticker: string): Promise<{
     return { score: 0, label: "neutral", headlines: [] };
   }
 }
+
+/**
+ * Use MiniMax AI to compute sentiment scores for a batch of headlines.
+ * Returns the average sentiment (-1 to +1), or null on failure.
+ */
+async function computeSentimentViaAI(ticker: string, headlines: string[]): Promise<number | null> {
+  if (!MINIMAX_API_KEY || headlines.length === 0) return null;
+
+  const prompt = `You are a financial news sentiment analyzer. For each headline below about ${ticker}, rate the sentiment on a scale from -1 (very bearish/negative) to +1 (very bullish/positive). Consider the full context and nuance of each headline — not just keywords.
+
+Headlines:
+${headlines.map((h, i) => `${i + 1}. ${h}`).join("\n")}
+
+Return ONLY a valid JSON array of numbers, one per headline, in the same order. Example: [0.8, -0.3, 0.0]
+Do not include any other text or explanation.`;
+
+  try {
+    const response = await fetch(MINIMAX_BASE, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${MINIMAX_API_KEY}`,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "MiniMax-M2.7",
+        max_tokens: 300,
+        temperature: 0.1,  // low temperature for consistency
+        system: "You are a precise financial sentiment analyzer. Respond only with valid JSON arrays.",
+        messages: [{ role: "user", content: prompt }],
+      }),
+      signal: AbortSignal.timeout(20000),
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      console.warn(`[NEWS][AI] ${ticker}: MiniMax ${response.status} — ${text.substring(0, 100)}`);
+      return null;
+    }
+
+    const data: any = await response.json();
+    const content = data?.content ?? [];
+    // Grab the LAST text block (after any thinking/prelude blocks)
+    let textBlock: any = null;
+    for (const b of content) {
+      if (b.type === "text") textBlock = b;
+    }
+
+    // Extract JSON array from whichever block has it — flexible pattern
+    const extractJSON = (raw: string): number[] | null => {
+      const m = raw.match(/\[\s*[\d.,\-]+(?:\s*,\s*[\d.,\-]+)*\s*\]/);
+      if (!m) return null;
+      try { return JSON.parse(m[0]) as number[]; } catch { return null; }
+    };
+
+    let scores: number[] | null = null;
+    if (textBlock?.text) {
+      scores = extractJSON(textBlock.text);
+    }
+    if (!scores) {
+      // Try thinking block
+      const thinkBlock = content.find((b: any) => b.type === "thinking");
+      if (thinkBlock?.thinking) {
+        scores = extractJSON(thinkBlock.thinking);
+      }
+    }
+    if (!scores || scores.length === 0) {
+      console.warn(`[NEWS][AI] ${ticker}: Could not parse sentiment JSON`);
+      return null;
+    }
+
+    const avg = Math.max(-1, Math.min(1, scores.reduce((s, v) => s + v, 0) / scores.length));
+    return avg;
+  } catch (err) {
+    console.warn(`[NEWS][AI] ${ticker}: MiniMax sentiment failed — ${err}`);
+    return null;
+  }
+}
+
 
 /**
  * Batch-fetch news sentiment for multiple tickers concurrently.
