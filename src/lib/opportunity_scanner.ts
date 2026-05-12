@@ -24,7 +24,7 @@ import {
   generateMomentumAlerts,
   generateEntrySignals,
 } from "./recommendations";
-import { runDiscovery, formatDiscoverySummary } from "./market_discovery";
+import { runDiscovery, formatDiscoverySummary, loadQueue } from "./market_discovery";
 import { batchFetchNewsSentiment } from "./news_sentiment";
 
 import * as fs from "fs";
@@ -418,22 +418,46 @@ export async function scanForOpportunities(): Promise<Opportunity[]> {
 
   // ── 7. NEWS SENTINEL — Standalone News Alerts ────────────────────────
   // Catches major news events (partnerships, acquisitions, regulatory rulings)
-  // that don't trigger technical signals. Every portfolio ticker is checked.
+  // that don't trigger technical signals. Portfolio tickers are ALWAYS checked.
+  // Watchlist tickers with >2% price movement and warm-bench (discovery) tickers
+  // are also checked — linking news visibility with the discovery pipeline.
   // Translates news into actionable trade guidance:
-  //   Bullish + held → AVOID suggesting BUY
+  //   Bullish + held → BUY THE NEWS? +N shares
   //   Bullish + not held → REVIEW for entry
   //   Bearish + held → TRIM or SELL with urgency
   //   Bearish + not held → AVOID
   try {
-    const portfolioTickers = positions.map(p => p.ticker);
     const heldSet = new Set(positions.map(p => p.ticker));
-    const newsMap = await batchFetchNewsSentiment(portfolioTickers);
+
+    // ── Gather tickers to check ──────────────────────────────────────
+    const toCheck = new Set<string>();
+
+    // 1. All portfolio tickers (always checked)
+    for (const p of positions) toCheck.add(p.ticker);
+
+    // 2. Watchlist tickers with >2% price movement (news-driven moves)
+    for (const [ticker, q] of watchlistQuotes) {
+      if (Math.abs(q.changePercent) >= 2) toCheck.add(ticker);
+    }
+
+    // 3. Warm bench — discovery queue entries (not dismissed)
+    try {
+      const queue = loadQueue();
+      for (const entry of queue.entries) {
+        if (entry.status !== "dismissed") toCheck.add(entry.ticker);
+      }
+    } catch { /* non-fatal */ }
+
+    // Fetch news for all collected tickers
+    const newsMap = await batchFetchNewsSentiment(Array.from(toCheck));
+
     for (const [ticker, sentiment] of newsMap) {
       if (Math.abs(sentiment.score) < 15) continue;
       if (seenThisScan.has(ticker)) continue;
       seenThisScan.add(ticker);
 
       const isHeld = heldSet.has(ticker);
+      const isOnWatchlist = watchlistQuotes.has(ticker);
       const pos = positions.find(p => p.ticker === ticker);
       const absScore = Math.abs(sentiment.score);
       const severity = absScore > 25 ? "critical" as const : "high" as const;
@@ -443,64 +467,64 @@ export async function scanForOpportunities(): Promise<Opportunity[]> {
         // ── BULLISH NEWS ──────────────────────────────────────────────
         if (isHeld && pos) {
           // Held stock + bullish catalyst → suggest adding
-          const buyBudget = portfolioValue * 0.05; // 5% of portfolio
+          const buyBudget = portfolioValue * 0.05;
           const sharesToAdd = Math.max(1, Math.floor(buyBudget / pos.currentPrice));
           const cost = sharesToAdd * pos.currentPrice;
-          const newTotal = pos.shares + sharesToAdd;
           opportunities.push({
             type: "news-event",
             severity,
             ticker,
             message: `🟢 NEWS ALERT — ${ticker}: ${sentiment.label.toUpperCase()} (${absScore}/30)`,
-            action: `BUY THE NEWS? +${sharesToAdd} shares (~$${cost.toLocaleString()})`,
-            rationale: `Bullish catalyst: ${headline.substring(0, 100)}. Current position: ${pos.shares} shares @ $${pos.currentPrice.toFixed(2)}. Suggested add: +${sharesToAdd} shares → ${newTotal} total.`,
-            riskNote: `News-driven moves can gap up. Consider a limit order, not market. Catalyst could already be priced in.`,
-            details: `Score: ${absScore}/30 | ${sentiment.headlines.length} articles | ${sentiment.headlines.join(" • ").substring(0, 150)}`,
+            action: `BUY THE NEWS? +${sharesToAdd} shares (~$${Math.round(cost).toLocaleString()})`,
+            rationale: `Bullish catalyst: ${headline.substring(0, 100)}. Position: ${pos.shares} sh @ $${pos.currentPrice.toFixed(2)}. Add +${sharesToAdd} → ${pos.shares + sharesToAdd} total.`,
+            riskNote: "News-driven moves can gap up. Use a limit order. Catalyst may already be priced in.",
+            details: `Score: ${absScore}/30 | ${sentiment.headlines.length} articles`,
           });
         } else {
           // Not held + bullish catalyst → suggest reviewing for entry
+          const via = isOnWatchlist ? "watchlist" : "discovery queue";
           opportunities.push({
             type: "news-event",
             severity,
             ticker,
             message: `🟢 NEWS ALERT — ${ticker}: ${sentiment.label.toUpperCase()} (${absScore}/30)`,
             action: `REVIEW — CONSIDER ENTRY`,
-            rationale: `Bullish catalyst: ${headline.substring(0, 100)}. Ticker is on radar but not currently held.`,
-            riskNote: `Do not chase the gap. Wait for pullback or confirmation before entering.`,
+            rationale: `Bullish catalyst: ${headline.substring(0, 100)}. On ${via}, not held.`,
+            riskNote: "Do not chase the gap. Wait for pullback or confirmation before entering.",
             details: `Score: ${absScore}/30 | ${sentiment.headlines.length} articles`,
           });
         }
       } else {
         // ── BEARISH NEWS ──────────────────────────────────────────────
         if (isHeld && pos) {
-          // Held stock + bearish catalyst → suggest trimming or selling
           const isCritical = absScore > 25;
-          const trimPct = isCritical ? 0.5 : 0.25; // 50% or 25% of position
+          const trimPct = isCritical ? 0.5 : 0.25;
           const sharesToSell = Math.max(1, Math.floor(pos.shares * trimPct));
           const proceeds = sharesToSell * pos.currentPrice;
-          const remaining = pos.shares - sharesToSell;
           opportunities.push({
             type: "news-event",
             severity: isCritical ? "critical" as const : "high" as const,
             ticker,
             message: `🔴 ${isCritical ? "CRITICAL" : "WARNING"} — ${ticker}: ${sentiment.label.toUpperCase()} (${absScore}/30)`,
-            action: isCritical ? `SELL ${sharesToSell} shares (~$${proceeds.toLocaleString()})` : `TRIM ${sharesToSell} shares (~$${proceeds.toLocaleString()})`,
-            rationale: `Bearish catalyst: ${headline.substring(0, 100)}. Current position: ${pos.shares} shares @ $${pos.currentPrice.toFixed(2)}. ${isCritical ? "URGENT: Consider selling before further downside." : `Suggested trim: -${sharesToSell} shares → ${remaining} remaining.`}`,
+            action: isCritical
+              ? `SELL ${sharesToSell} shares (~$${Math.round(proceeds).toLocaleString()})`
+              : `TRIM ${sharesToSell} shares (~$${Math.round(proceeds).toLocaleString()})`,
+            rationale: `Bearish catalyst: ${headline.substring(0, 100)}. Position: ${pos.shares} sh @ $${pos.currentPrice.toFixed(2)}. ${isCritical ? "URGENT: sell before further downside." : `Trim -${sharesToSell} → ${pos.shares - sharesToSell} remaining.`}`,
             riskNote: isCritical
-              ? "🚨 Bankruptcy / regulatory / fraud risk detected. Preserve capital — you can always re-enter later."
-              : "News-driven selloffs can be temporary. Trim to reduce exposure, do not panic-sell the whole position.",
-            details: `Score: ${absScore}/30 | ${sentiment.headlines.length} articles | ${sentiment.headlines.join(" • ").substring(0, 150)}`,
+              ? "🚨 Bankruptcy / regulatory / fraud risk detected. Preserve capital."
+              : "News-driven selloffs can be temporary. Trim to reduce exposure.",
+            details: `Score: ${absScore}/30 | ${sentiment.headlines.length} articles`,
           });
         } else {
-          // Not held + bearish catalyst → suggest avoiding
+          const via = isOnWatchlist ? "watchlist" : "discovery queue";
           opportunities.push({
             type: "news-event",
             severity,
             ticker,
             message: `🔴 NEWS ALERT — ${ticker}: ${sentiment.label.toUpperCase()} (${absScore}/30)`,
             action: `AVOID — DO NOT BUY`,
-            rationale: `Bearish catalyst: ${headline.substring(0, 100)}. Ticker is on radar — remove from watchlist until sentiment stabilizes.`,
-            riskNote: `Do not try to catch a falling knife. Wait for sentiment recovery before reconsidering.`,
+            rationale: `Bearish catalyst: ${headline.substring(0, 100)}. On ${via}. Remove from radar until sentiment stabilizes.`,
+            riskNote: "Do not try to catch a falling knife. Wait for sentiment recovery.",
             details: `Score: ${absScore}/30 | ${sentiment.headlines.length} articles`,
           });
         }
